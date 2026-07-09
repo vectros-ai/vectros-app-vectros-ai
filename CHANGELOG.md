@@ -3,6 +3,16 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.7.0 — 2026-07-08
+
+### Added
+
+- **Update-available banner** — after a new version of the app is deployed, an
+  already-open tab now shows a dismissible "a new version is available" prompt
+  with a Refresh action, so a long-running session can move to the latest build
+  instead of eventually hitting a stale-asset error. The refresh is always
+  user-initiated.
+
 ## 0.6.2 — 2026-07-05
 
 ### Added

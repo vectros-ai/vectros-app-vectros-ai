@@ -21,7 +21,7 @@ import { ThemeProvider, CssBaseline } from '@mui/material';
 import { BrowserRouter } from 'react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { AuthProvider, CognitoAuthProvider, CurrentTenantProvider, ErrorBoundary } from '@vectros-ai/react';
+import { AuthProvider, CognitoAuthProvider, CurrentTenantProvider, ErrorBoundary, VersionUpdateBanner } from '@vectros-ai/react';
 import { setPartnerApiTokenMinter } from '@vectros-ai/react';
 
 import App from './App';
@@ -94,6 +94,12 @@ setPartnerApiTokenMinter((tenantId, contextId) =>
   authProvider.mintPartnerApiToken(tenantId, contextId),
 );
 
+// Build id baked in by the versionManifest() plugin in vite.config.ts. The
+// `typeof` guard keeps this a safe read if the define ever fails to apply —
+// it falls back to a non-deploy id so the banner simply disables itself
+// rather than throwing a ReferenceError at module load.
+const APP_VERSION = typeof __APP_VERSION__ === 'undefined' ? 'dev' : __APP_VERSION__;
+
 // 6. Mount.
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -122,6 +128,14 @@ ReactDOM.createRoot(rootElement).render(
         <IntlProvider>
           <ThemeProvider theme={theme}>
             <CssBaseline />
+            {/*
+              App-wide, route-independent: polls version.json and offers a
+              user-initiated refresh when a newer build is deployed, so a
+              long-open tab never strands on a stale shell (a pruned lazy chunk
+              would otherwise 404). Inside ThemeProvider for MUI theming;
+              outside the Router since it is not route-scoped.
+            */}
+            <VersionUpdateBanner currentVersion={APP_VERSION} />
             <BrowserRouter>
               <AuthProvider provider={authProvider}>
                 {/*
