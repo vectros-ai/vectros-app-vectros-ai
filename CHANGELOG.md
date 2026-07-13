@@ -3,6 +3,27 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.8.0 — 2026-07-11
+
+### Added
+
+- **Ownership scopes on your data** — when you create a record, folder, or
+  ingested document you can now choose its ownership: inherit your credential's
+  identity (the default), keep it private to you, or set specific namespaced
+  scopes such as `org` or a custom `group` (up to two). Record and document
+  detail pages show an item's ownership scopes, and you can filter records,
+  documents, search results, and Ask retrieval by owner scope in `namespace:value`
+  form (for example `group:eng-team`). Uploaded files inherit your credential's
+  identity.
+
+## 0.7.1 — 2026-07-10
+
+### Changed
+
+- **Dependency maintenance** — updated `aws-amplify`, `vite`, `vitest`, and the
+  Vectros SDK to their current releases and cleared known advisories in
+  transitive dependencies. No functional changes.
+
 ## 0.7.0 — 2026-07-08
 
 ### Added

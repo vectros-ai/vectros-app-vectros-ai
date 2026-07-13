@@ -104,6 +104,29 @@ describe('RecordsPage', () => {
     );
   });
 
+  it('passes a well-formed owner-scope filter to listRecords', async () => {
+    const user = userEvent.setup();
+    const listRecords = vi.fn().mockResolvedValue(pageOf([]));
+    stub({
+      listSchemas: vi.fn().mockResolvedValue(
+        pageOf([{ id: 's1', allowedSurfaces: ['record'], typeName: 'intake_form', displayName: 'Intake Form' }]),
+      ),
+      listRecords,
+    });
+    renderPage('/records?type=intake_form');
+
+    await screen.findByRole('combobox', { name: 'Record type' });
+    await user.type(screen.getByRole('textbox', { name: /owner scope/i }), 'group:eng');
+
+    // A malformed prefix (e.g. "group") must NOT fire a scope filter; only the
+    // completed `group:eng` does.
+    await waitFor(() =>
+      expect(listRecords).toHaveBeenLastCalledWith(
+        expect.objectContaining({ type: 'intake_form', scope: 'group:eng' }),
+      ),
+    );
+  });
+
   it('excludes document-only schemas from the record type picker', async () => {
     const user = userEvent.setup();
     stub({

@@ -68,6 +68,7 @@ import { fieldLabel } from '../../lib/recordForm';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { LookupPanel } from '../../components/LookupPanel';
 import type { AppliedLookup, LookupFieldDef } from '../../components/LookupPanel';
+import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
 import { RefreshButton } from '../../components/RefreshButton';
 
 /** Page size for the records list — the API's max (default is 20). */
@@ -91,6 +92,10 @@ export function RecordsPage(): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedType = searchParams.get('type');
   const [filterQuery, setFilterQuery] = useState('');
+  // Ownership-scope filter (`scope=<namespace>:<value>`) — distinct from the
+  // content-type filter above. Only applied when it is well-formed.
+  const [scopeFilter, setScopeFilter] = useState('');
+  const scopeParam = scopeFilterParam(scopeFilter);
   const [sort, setSort] = useState<{ key: string; direction: SortDirection } | null>(null);
   // The APPLIED server-side lookup (null = plain list). The in-progress inputs
   // live inside LookupPanel; it delivers a lookup here only on submit, so the
@@ -138,9 +143,12 @@ export function RecordsPage(): React.JSX.Element {
     .map((l) => ({ fieldName: l.fieldName, rangeEnabled: l.rangeEnabled === true }));
 
   const recordsQuery = useQuery({
+    // The ownership filter applies to the browse (non-lookup) path only, so it's
+    // in the key ONLY there — appending it to the lookup key would wastefully
+    // refetch identical rows. Prefix-invalidation still matches.
     queryKey: appliedLookup
       ? dataQueryKeys.recordsLookup(tenant, context, effectiveType ?? '', JSON.stringify(appliedLookup))
-      : dataQueryKeys.records(tenant, context, effectiveType ?? ''),
+      : [...dataQueryKeys.records(tenant, context, effectiveType ?? ''), scopeParam ?? 'all'],
     queryFn: async () => {
       const api = vectrosApiClient(tenant, context).records;
       // `{ data, nextCursor }` page envelope → first-page items.
@@ -164,7 +172,11 @@ export function RecordsPage(): React.JSX.Element {
         ).data ?? [];
       }
       return (
-        await api.listRecords({ type: effectiveType as string, limit: RECORDS_PAGE_SIZE })
+        await api.listRecords({
+          type: effectiveType as string,
+          limit: RECORDS_PAGE_SIZE,
+          ...(scopeParam ? { scope: scopeParam } : {}),
+        })
       ).data ?? [];
     },
     enabled: effectiveType !== null,
@@ -313,6 +325,13 @@ export function RecordsPage(): React.JSX.Element {
                 sx={{ minWidth: 240, maxWidth: 360 }}
               />
             )}
+            {/* Ownership filter applies to the browse path; a server-side lookup
+                runs over the whole context and ignores it, so disable it then. */}
+            <OwnershipScopeFilter
+              value={scopeFilter}
+              onChange={setScopeFilter}
+              disabled={appliedLookup !== null}
+            />
           </Box>
 
           {/* Server-side lookup — only when the active schema declares lookup

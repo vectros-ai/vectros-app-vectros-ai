@@ -33,6 +33,7 @@ import { findDisplayFieldId, formatCellValue } from '../../lib/recordColumns';
 import { deriveReferenceFields, referenceValues } from '../../lib/recordReferences';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { ReferenceLink } from '../../components/ReferenceLink';
+import { OwnershipScopeChips } from '../../components/OwnershipScopeChips';
 import { RequestIdCaption } from '../../components/RequestIdCaption';
 import { VersionHistory } from '../../components/VersionHistory';
 
@@ -318,6 +319,9 @@ export function RecordDetailPage(): React.JSX.Element {
               <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
                 {record.userId ?? record.orgId ?? record.clientId ?? '—'}
               </Typography>
+            </MetaRow>
+            <MetaRow label={intl.formatMessage({ id: 'recordDetail.fieldScopes' })}>
+              <OwnershipScopeChips scopes={record.scopes} />
             </MetaRow>
             <MetaRow label={intl.formatMessage({ id: 'recordDetail.fieldFolder' })}>
               <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>

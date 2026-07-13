@@ -88,6 +88,8 @@ import {
 } from '../../lib/documentLabels';
 import { formatBytes } from '../../lib/formatBytes';
 import { FolderEditorDialog } from '../../components/FolderEditorDialog';
+import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
+import { OwnershipScopeChips } from '../../components/OwnershipScopeChips';
 import { LookupPanel } from '../../components/LookupPanel';
 import type { AppliedLookup, LookupFieldDef } from '../../components/LookupPanel';
 import { AddDocumentDialog } from '../../components/AddDocumentDialog';
@@ -124,6 +126,10 @@ export function DocumentsPage(): React.JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedType = searchParams.get('type');
   const [filterQuery, setFilterQuery] = useState('');
+  // Ownership-scope filter (`scope=<namespace>:<value>`) — distinct from the
+  // content-type + folder filters. Only applied when it is well-formed.
+  const [scopeFilter, setScopeFilter] = useState('');
+  const scopeParam = scopeFilterParam(scopeFilter);
   const [sort, setSort] = useState<{ key: string; direction: SortDirection } | null>(null);
   const [folderFilter, setFolderFilter] = useState<string>(ALL_FOLDERS);
   // The APPLIED server-side lookup (null = plain list). Typed view only —
@@ -167,13 +173,14 @@ export function DocumentsPage(): React.JSX.Element {
   // when ALL, omit it. Keyed by the folder so a switch refetches cleanly.
   const scopedFolderId = folderFilter === ALL_FOLDERS ? undefined : folderFilter;
   const documentsQuery = useQuery({
-    queryKey: dataQueryKeys.documents(tenant, context, scopedFolderId),
+    queryKey: [...dataQueryKeys.documents(tenant, context, scopedFolderId), scopeParam ?? 'all'],
     queryFn: () =>
       drainPages<DocumentResponse>(
         async (startFrom) =>
           (
             await vectrosApiClient(tenant, context).documents.listDocuments({
               ...(scopedFolderId === undefined ? {} : { folderId: scopedFolderId }),
+              ...(scopeParam ? { scope: scopeParam } : {}),
               ...(startFrom === undefined ? { limit: PAGE_SIZE } : { startFrom, limit: PAGE_SIZE }),
             })
           ).data ?? [], // `{ data, nextCursor }` page envelope → items array
@@ -460,6 +467,8 @@ export function DocumentsPage(): React.JSX.Element {
                 </FormControl>
               )}
 
+              <OwnershipScopeFilter value={scopeFilter} onChange={setScopeFilter} />
+
               {activeSchema && filterFieldIds.length > 0 && (
                 <TextField
                   size="small"
@@ -505,9 +514,15 @@ export function DocumentsPage(): React.JSX.Element {
                       key={folder.id}
                       sx={{ display: 'flex', alignItems: 'center', gap: 1, py: 0.5 }}
                     >
-                      <Typography variant="body2" sx={{ flexGrow: 1, pl: depth * 2, minWidth: 0 }}>
+                      <Typography variant="body2" sx={{ pl: depth * 2, minWidth: 0 }}>
                         {folder.name && folder.name.length > 0 ? folder.name : folder.id}
                       </Typography>
+                      {/* Ownership scopes, shown only when the folder carries any
+                          (most inherit — no chip to keep the row uncluttered). */}
+                      {folder.scopes && folder.scopes.length > 0 && (
+                        <OwnershipScopeChips scopes={folder.scopes} />
+                      )}
+                      <Box sx={{ flexGrow: 1 }} />
                       <Tooltip title={intl.formatMessage({ id: 'documents.askFolder' })}>
                         <IconButton
                           size="small"

@@ -72,6 +72,7 @@ import { DocumentAskDrawer } from '../../components/DocumentAskDrawer';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { RequestIdCaption } from '../../components/RequestIdCaption';
 import { VersionHistory } from '../../components/VersionHistory';
+import { OwnershipScopeChips } from '../../components/OwnershipScopeChips';
 
 export function DocumentDetailPage(): React.JSX.Element {
   const tenant = useActiveTenantId();
@@ -488,6 +489,9 @@ export function DocumentDetailPage(): React.JSX.Element {
               <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
                 {doc.userId ?? doc.orgId ?? doc.clientId ?? '—'}
               </Typography>
+            </MetaRow>
+            <MetaRow label={intl.formatMessage({ id: 'documentDetail.fieldScopes' })}>
+              <OwnershipScopeChips scopes={doc.scopes} />
             </MetaRow>
             <MetaRow label={intl.formatMessage({ id: 'documentDetail.fieldType' })}>
               <Typography variant="body2">{doc.fileType ?? '—'}</Typography>

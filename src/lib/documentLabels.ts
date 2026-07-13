@@ -70,6 +70,7 @@ export function documentIndexStatusColor(
       return 'error';
     case 'SKIPPED':
       // Extraction produced no indexable text — benign, not an error. Neutral chip.
+      return 'default';
     case 'STORED':
       // Store-only by design (indexMode=NONE) — retrievable, deliberately unindexed.
       return 'default';

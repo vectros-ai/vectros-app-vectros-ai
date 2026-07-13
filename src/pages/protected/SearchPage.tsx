@@ -56,6 +56,7 @@ import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { drainPages } from '../../lib/drainPages';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { folderMenuItems } from '../../components/folderMenuItems';
+import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
 
 /** Result page size — the API caps at 100; 25 is a reasonable page. */
 const SEARCH_LIMIT = 25;
@@ -101,6 +102,10 @@ export function SearchPage(): React.JSX.Element {
   const [scope, setScope] = useState<Scope>('all');
   const [folderFilter, setFolderFilter] = useState<string>(ALL_FOLDERS);
   const [typeFilter, setTypeFilter] = useState<string>(ANY_TYPE);
+  // Ownership filter (`scope=<namespace>:<value>`) — the item OWNER, distinct
+  // from the `scope` content-type control above. Only applied when well-formed.
+  const [ownerScope, setOwnerScope] = useState('');
+  const ownerScopeParam = scopeFilterParam(ownerScope);
 
   // Filter option sources (cached; shared with the records/documents pages).
   const foldersQuery = useQuery({
@@ -137,7 +142,13 @@ export function SearchPage(): React.JSX.Element {
   // both content types ("all") or just the one selected.
   const typeName = typeFilter !== ANY_TYPE ? typeFilter : undefined;
   // Stable serialization of everything that affects the result set.
-  const descriptor = JSON.stringify({ mode, scope, folder: folderId ?? null, type: typeName ?? null });
+  const descriptor = JSON.stringify({
+    mode,
+    scope,
+    folder: folderId ?? null,
+    type: typeName ?? null,
+    owner: ownerScopeParam ?? null,
+  });
 
   const searchQuery = useInfiniteQuery({
     queryKey: dataQueryKeys.search(tenant, context, submittedQuery, descriptor),
@@ -151,6 +162,7 @@ export function SearchPage(): React.JSX.Element {
         ...(contentTypes ? { contentTypes } : {}),
         ...(folderId ? { folderId } : {}),
         ...(typeName ? { typeName } : {}),
+        ...(ownerScopeParam ? { scope: ownerScopeParam } : {}),
       });
     },
     initialPageParam: 0,
@@ -293,6 +305,8 @@ export function SearchPage(): React.JSX.Element {
               </Select>
             </FormControl>
           )}
+
+          <OwnershipScopeFilter value={ownerScope} onChange={setOwnerScope} />
         </Box>
       </Stack>
 

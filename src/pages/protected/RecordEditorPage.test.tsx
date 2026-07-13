@@ -120,6 +120,64 @@ describe('RecordEditorPage — create', () => {
     );
   });
 
+  it('sends a Private ownership as scopes:[]', async () => {
+    const user = userEvent.setup();
+    const createRecord = vi.fn().mockResolvedValue({ id: 'rec_new', typeName: 'intake_form' });
+    const listSchemas = vi
+      .fn()
+      .mockResolvedValue(pageOf([{ id: 'schema_abc', allowedSurfaces: ['record'], typeName: 'intake_form', displayName: 'Intake' }]));
+    renderEditor('/records/new', { schemas: { listSchemas }, records: { createRecord } });
+
+    await user.click(await screen.findByLabelText('Record type'));
+    await user.click(await screen.findByRole('option', { name: 'Intake' }));
+    fireEvent.change(screen.getByLabelText('Payload (JSON)'), {
+      target: { value: '{"firstName":"Alice"}' },
+    });
+    await user.click(screen.getByRole('radio', { name: /private/i }));
+    await user.click(screen.getByRole('button', { name: 'Create record' }));
+
+    await waitFor(() =>
+      expect(createRecord).toHaveBeenCalledWith({
+        body: {
+          typeName: 'intake_form',
+          schemaId: 'schema_abc',
+          payload: { firstName: 'Alice' },
+          scopes: [],
+        },
+      }),
+    );
+  });
+
+  it('sends a custom namespace:value ownership scope', async () => {
+    const user = userEvent.setup();
+    const createRecord = vi.fn().mockResolvedValue({ id: 'rec_new', typeName: 'intake_form' });
+    const listSchemas = vi
+      .fn()
+      .mockResolvedValue(pageOf([{ id: 'schema_abc', allowedSurfaces: ['record'], typeName: 'intake_form', displayName: 'Intake' }]));
+    renderEditor('/records/new', { schemas: { listSchemas }, records: { createRecord } });
+
+    await user.click(await screen.findByLabelText('Record type'));
+    await user.click(await screen.findByRole('option', { name: 'Intake' }));
+    fireEvent.change(screen.getByLabelText('Payload (JSON)'), {
+      target: { value: '{"firstName":"Alice"}' },
+    });
+    await user.click(screen.getByRole('radio', { name: /custom scopes/i }));
+    await user.type(screen.getByRole('textbox', { name: /namespace/i }), 'group');
+    await user.type(screen.getByRole('textbox', { name: /^value$/i }), 'eng');
+    await user.click(screen.getByRole('button', { name: 'Create record' }));
+
+    await waitFor(() =>
+      expect(createRecord).toHaveBeenCalledWith({
+        body: {
+          typeName: 'intake_form',
+          schemaId: 'schema_abc',
+          payload: { firstName: 'Alice' },
+          scopes: ['group:eng'],
+        },
+      }),
+    );
+  });
+
   it('pre-selects the schema from the ?type= deep link', async () => {
     const user = userEvent.setup();
     const createRecord = vi.fn().mockResolvedValue({ id: 'rec_new', typeName: 'intake_form' });

@@ -36,6 +36,8 @@ import type { FolderResponse } from '../api/vectrosApi';
 import { dataQueryKeys } from '../lib/dataQueryKeys';
 import { ApiErrorAlert } from './ApiErrorAlert';
 import { folderMenuItems } from './folderMenuItems';
+import { OwnershipScopeField } from './OwnershipScopeField';
+import type { OwnershipScopeSelection } from './OwnershipScopeField';
 
 /** Sentinel for the "no parent (root)" option in the parent select. */
 const ROOT_PARENT = '';
@@ -65,6 +67,12 @@ export function FolderEditorDialog({
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [parentFolderId, setParentFolderId] = useState<string>(ROOT_PARENT);
+  // Ownership scopes (create-only). The field remounts per open (keyed on
+  // `open`) so it resets to Inherit each time the dialog is shown.
+  const [scopeSel, setScopeSel] = useState<OwnershipScopeSelection>({
+    scopes: undefined,
+    valid: true,
+  });
 
   // Seed the form whenever the dialog opens (or the target folder changes).
   useEffect(() => {
@@ -85,6 +93,8 @@ export function FolderEditorDialog({
             name: trimmedName,
             ...(trimmedDescription === '' ? {} : { description: trimmedDescription }),
             ...(parentFolderId === ROOT_PARENT ? {} : { parentFolderId }),
+            // Omit `scopes` to inherit the token's full identity; `[]` = private.
+            ...(scopeSel.scopes === undefined ? {} : { scopes: scopeSel.scopes }),
           },
         });
       }
@@ -103,7 +113,10 @@ export function FolderEditorDialog({
     },
   });
 
-  const canSave = name.trim() !== '' && !mutation.isPending;
+  const canSave =
+    name.trim() !== '' &&
+    !mutation.isPending &&
+    (mode === 'edit' || scopeSel.valid);
 
   return (
     <Dialog open={open} onClose={() => !mutation.isPending && onClose()} fullWidth maxWidth="sm">
@@ -152,6 +165,9 @@ export function FolderEditorDialog({
                 {folderMenuItems(folders)}
               </Select>
             </FormControl>
+          )}
+          {mode === 'create' && (
+            <OwnershipScopeField key={open ? 'open' : 'closed'} onChange={setScopeSel} />
           )}
         </Stack>
       </DialogContent>

@@ -301,6 +301,94 @@ describe('AddDocumentDialog — ingest mode', () => {
   });
 });
 
+describe('AddDocumentDialog — ownership scopes', () => {
+  beforeEach(() => mockedClient.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('ingest default (Inherit) sends NO scopes key', async () => {
+    const user = userEvent.setup();
+    const ingestDocument = vi.fn().mockResolvedValue({ id: 'doc_1' });
+    stub({ ingestDocument });
+    renderDialog();
+    await user.click(screen.getByRole('button', { name: /ingest text/i }));
+    await user.type(screen.getByRole('textbox', { name: 'Title' }), 'Notes');
+    await user.type(screen.getByRole('textbox', { name: /text content/i }), 'Body');
+    await user.click(screen.getByRole('button', { name: 'Ingest' }));
+
+    await vi.waitFor(() => expect(ingestDocument).toHaveBeenCalled());
+    const body = ingestDocument.mock.calls[0]?.[0]?.body as Record<string, unknown>;
+    expect(body).not.toHaveProperty('scopes');
+  });
+
+  it('ingest + Private sends scopes: []', async () => {
+    const user = userEvent.setup();
+    const ingestDocument = vi.fn().mockResolvedValue({ id: 'doc_1' });
+    stub({ ingestDocument });
+    renderDialog();
+    await user.click(screen.getByRole('button', { name: /ingest text/i }));
+    await user.type(screen.getByRole('textbox', { name: 'Title' }), 'Notes');
+    await user.type(screen.getByRole('textbox', { name: /text content/i }), 'Body');
+    await user.click(screen.getByRole('radio', { name: /private/i }));
+    await user.click(screen.getByRole('button', { name: 'Ingest' }));
+
+    await vi.waitFor(() =>
+      expect(ingestDocument).toHaveBeenCalledWith(
+        expect.objectContaining({ body: expect.objectContaining({ scopes: [] }) }),
+      ),
+    );
+  });
+
+  it('ingest + Custom sends the namespace:value scope', async () => {
+    const user = userEvent.setup();
+    const ingestDocument = vi.fn().mockResolvedValue({ id: 'doc_1' });
+    stub({ ingestDocument });
+    renderDialog();
+    await user.click(screen.getByRole('button', { name: /ingest text/i }));
+    await user.type(screen.getByRole('textbox', { name: 'Title' }), 'Notes');
+    await user.type(screen.getByRole('textbox', { name: /text content/i }), 'Body');
+    await user.click(screen.getByRole('radio', { name: /custom scopes/i }));
+    await user.type(screen.getByRole('textbox', { name: /namespace/i }), 'group');
+    await user.type(screen.getByRole('textbox', { name: /^value$/i }), 'eng');
+    await user.click(screen.getByRole('button', { name: 'Ingest' }));
+
+    await vi.waitFor(() =>
+      expect(ingestDocument).toHaveBeenCalledWith(
+        expect.objectContaining({ body: expect.objectContaining({ scopes: ['group:eng'] }) }),
+      ),
+    );
+  });
+
+  it('ingest with an invalid custom scope disables Ingest', async () => {
+    const user = userEvent.setup();
+    stub({ ingestDocument: vi.fn() });
+    renderDialog();
+    await user.click(screen.getByRole('button', { name: /ingest text/i }));
+    await user.type(screen.getByRole('textbox', { name: 'Title' }), 'Notes');
+    await user.type(screen.getByRole('textbox', { name: /text content/i }), 'Body');
+    await user.click(screen.getByRole('radio', { name: /custom scopes/i }));
+    await user.type(screen.getByRole('textbox', { name: /namespace/i }), 'tenant'); // reserved
+    await user.type(screen.getByRole('textbox', { name: /^value$/i }), 'x');
+    expect(screen.getByRole('button', { name: 'Ingest' })).toBeDisabled();
+  });
+
+  it('the upload path exposes NO ownership control and sends no scopes', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi.fn().mockResolvedValue({ uploadUrl: 'https://s3.example/put' });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    stub({ uploadDocument });
+    renderDialog();
+    // Upload mode is the default — no ownership radios are rendered.
+    expect(screen.queryByRole('radio', { name: /private/i })).not.toBeInTheDocument();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await vi.waitFor(() => expect(uploadDocument).toHaveBeenCalled());
+    expect(uploadDocument).not.toHaveBeenCalledWith(
+      expect.objectContaining({ scopes: expect.anything() }),
+    );
+  });
+});
+
 describe('AddDocumentDialog — externalId on upload', () => {
   beforeEach(() => mockedClient.mockReset());
   afterEach(() => vi.unstubAllGlobals());

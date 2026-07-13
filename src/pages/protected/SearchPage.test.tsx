@@ -94,6 +94,25 @@ describe('SearchPage', () => {
     expect(screen.getByText('doc match')).toBeInTheDocument();
   });
 
+  it('threads a well-formed owner scope into the search as `scope`', async () => {
+    const user = userEvent.setup();
+    const content = vi.fn().mockResolvedValue({ results: [] });
+    stub({ content });
+    renderPage();
+    await user.type(screen.getByRole('textbox', { name: /owner scope/i }), 'group:eng');
+    await runSearch('hello');
+
+    await vi.waitFor(() =>
+      expect(content).toHaveBeenLastCalledWith(
+        expect.objectContaining({ query: 'hello', scope: 'group:eng' }),
+      ),
+    );
+    // A malformed owner scope must NOT reach the search call.
+    expect(content.mock.calls.every(([arg]) => (arg as { scope?: string }).scope !== 'group')).toBe(
+      true,
+    );
+  });
+
   it('uses the item title from metadata as the result heading', async () => {
     stub({
       content: vi.fn().mockResolvedValue({

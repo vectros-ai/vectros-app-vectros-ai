@@ -101,6 +101,40 @@ describe('FolderEditorDialog — create', () => {
     );
   });
 
+  it('sends scopes:[] when ownership is set to Private', async () => {
+    const user = userEvent.setup();
+    const createFolder = vi.fn().mockResolvedValue({ id: 'f_new' });
+    stub({ createFolder });
+
+    renderDialog({ mode: 'create' });
+    await user.type(screen.getByRole('textbox', { name: 'Folder name' }), 'Mine');
+    await user.click(screen.getByRole('radio', { name: /private/i }));
+    await user.click(screen.getByRole('button', { name: 'Create folder' }));
+
+    await vi.waitFor(() =>
+      expect(createFolder).toHaveBeenCalledWith({ body: { name: 'Mine', scopes: [] } }),
+    );
+  });
+
+  it('sends a custom namespace:value scope', async () => {
+    const user = userEvent.setup();
+    const createFolder = vi.fn().mockResolvedValue({ id: 'f_new' });
+    stub({ createFolder });
+
+    renderDialog({ mode: 'create' });
+    await user.type(screen.getByRole('textbox', { name: 'Folder name' }), 'Team');
+    await user.click(screen.getByRole('radio', { name: /custom scopes/i }));
+    await user.type(screen.getByRole('textbox', { name: /namespace/i }), 'group');
+    await user.type(screen.getByRole('textbox', { name: /^value$/i }), 'eng');
+    await user.click(screen.getByRole('button', { name: 'Create folder' }));
+
+    await vi.waitFor(() =>
+      expect(createFolder).toHaveBeenCalledWith({
+        body: { name: 'Team', scopes: ['group:eng'] },
+      }),
+    );
+  });
+
   it('surfaces an error and stays open on failure', async () => {
     const user = userEvent.setup();
     stub({ createFolder: vi.fn().mockRejectedValue(new Error('boom')) });

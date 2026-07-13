@@ -66,6 +66,8 @@ import {
 } from '../../lib/recordForm';
 import { RecordFormFields } from '../../components/RecordFormFields';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
+import { OwnershipScopeField } from '../../components/OwnershipScopeField';
+import type { OwnershipScopeSelection } from '../../components/OwnershipScopeField';
 
 /** A schema usable as a create target: id + typeName are present. */
 type CreatableSchema = SchemaResponse & { readonly id: string; readonly typeName: string };
@@ -90,6 +92,12 @@ export function RecordEditorPage(): React.JSX.Element {
   const [seeded, setSeeded] = useState(false);
   const [selectedSchemaId, setSelectedSchemaId] = useState('');
   const [externalId, setExternalId] = useState('');
+  // Ownership scopes chosen at create time (create-only; ownership is immutable
+  // after create). `scopes: undefined` = inherit the token's identity.
+  const [scopeSel, setScopeSel] = useState<OwnershipScopeSelection>({
+    scopes: undefined,
+    valid: true,
+  });
   const [conflict, setConflict] = useState(false);
   const [viewMode, setViewMode] = useState<'form' | 'raw'>('form');
 
@@ -190,6 +198,8 @@ export function RecordEditorPage(): React.JSX.Element {
             schemaId: schema.id,
             payload,
             ...(trimmedExternalId === '' ? {} : { externalId: trimmedExternalId }),
+            // Omit `scopes` to inherit the token's full identity; `[]` = private.
+            ...(scopeSel.scopes === undefined ? {} : { scopes: scopeSel.scopes }),
           },
         });
       }
@@ -313,7 +323,7 @@ export function RecordEditorPage(): React.JSX.Element {
     parsed.ok &&
     !saveMutation.isPending &&
     !formInvalid &&
-    (mode === 'edit' || selectedSchemaId !== '');
+    (mode === 'edit' || (selectedSchemaId !== '' && scopeSel.valid));
 
   return (
     <Stack spacing={3}>
@@ -405,6 +415,10 @@ export function RecordEditorPage(): React.JSX.Element {
                   sx={{ maxWidth: 480 }}
                   slotProps={{ htmlInput: { maxLength: 256 } }}
                 />
+
+                <Box sx={{ maxWidth: 480 }}>
+                  <OwnershipScopeField onChange={setScopeSel} />
+                </Box>
               </>
             ) : (
               <Typography variant="body2" color="text.secondary">

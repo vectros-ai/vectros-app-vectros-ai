@@ -114,6 +114,34 @@ describe('AskPage', () => {
     expect(req.query).toBe('What is X?');
   });
 
+  it('threads a well-formed owner scope into the RAG retrieval `search.scope`', async () => {
+    const user = userEvent.setup();
+    const ragInference = stubRag(() => Promise.resolve(ragStream()));
+    renderPage();
+
+    await user.type(screen.getByRole('textbox', { name: /owner scope/i }), 'group:eng');
+    await user.type(screen.getByRole('textbox', { name: /ask a question/i }), 'Q');
+    await user.click(screen.getByRole('button', { name: 'Ask' }));
+
+    await waitFor(() => expect(ragInference).toHaveBeenCalled());
+    const req = ragInference.mock.calls[0]?.[0] as { search?: { scope?: string } };
+    expect(req.search?.scope).toBe('group:eng');
+  });
+
+  it('omits a malformed owner scope from the RAG retrieval', async () => {
+    const user = userEvent.setup();
+    const ragInference = stubRag(() => Promise.resolve(ragStream()));
+    renderPage();
+
+    await user.type(screen.getByRole('textbox', { name: /owner scope/i }), 'group'); // no value
+    await user.type(screen.getByRole('textbox', { name: /ask a question/i }), 'Q');
+    await user.click(screen.getByRole('button', { name: 'Ask' }));
+
+    await waitFor(() => expect(ragInference).toHaveBeenCalled());
+    const req = ragInference.mock.calls[0]?.[0] as { search?: { scope?: string } };
+    expect(req.search?.scope).toBeUndefined();
+  });
+
   it('shows a no-sources note when the answer has no citations', async () => {
     const user = userEvent.setup();
     stubRag(() =>

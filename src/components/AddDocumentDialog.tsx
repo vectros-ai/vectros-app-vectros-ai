@@ -66,6 +66,8 @@ import { MAX_UPLOAD_BYTES } from '../lib/uploadLimits';
 import { ApiErrorAlert } from './ApiErrorAlert';
 import { RecordFormFields } from './RecordFormFields';
 import { folderMenuItems } from './folderMenuItems';
+import { OwnershipScopeField } from './OwnershipScopeField';
+import type { OwnershipScopeSelection } from './OwnershipScopeField';
 
 const NO_FOLDER = '';
 const NO_TYPE = '';
@@ -111,6 +113,11 @@ export function AddDocumentDialog({
   const [payload, setPayload] = useState<Record<string, unknown>>({});
   const [externalId, setExternalId] = useState('');
   const [upsert, setUpsert] = useState(false);
+  // Ownership scopes for text ingest (the file-upload path inherits identity).
+  const [scopeSel, setScopeSel] = useState<OwnershipScopeSelection>({
+    scopes: undefined,
+    valid: true,
+  });
   // Set when a text ingest matched an existing externalId WITHOUT upsert — the
   // submitted content was NOT applied, which must not look like a save.
   const [existingUnchanged, setExistingUnchanged] = useState(false);
@@ -210,6 +217,9 @@ export function AddDocumentDialog({
           ...payloadPart,
           ...folderPart,
           ...externalIdPart,
+          // Omit `scopes` to inherit the token's full identity; `[]` = private.
+          // (Text ingest only — the file-upload path inherits identity.)
+          ...(scopeSel.scopes === undefined ? {} : { scopes: scopeSel.scopes }),
         },
       });
       // created:false without upsert = the submitted title/text were NOT
@@ -232,7 +242,7 @@ export function AddDocumentDialog({
     Object.keys(fieldErrors).length === 0 &&
     (mode === 'upload'
       ? file !== null && !fileTooLarge
-      : title.trim() !== '' && text.trim() !== '');
+      : title.trim() !== '' && text.trim() !== '' && scopeSel.valid);
 
   return (
     <Dialog open={open} onClose={() => !mutation.isPending && onClose()} fullWidth maxWidth="sm">
@@ -429,6 +439,14 @@ export function AddDocumentDialog({
               control={<Switch checked={upsert} onChange={(e) => setUpsert(e.target.checked)} />}
               label={intl.formatMessage({ id: 'addDocument.upsert' })}
             />
+          )}
+
+          {mode === 'ingest' ? (
+            <OwnershipScopeField key={open ? 'open' : 'closed'} onChange={setScopeSel} />
+          ) : (
+            <Typography variant="caption" color="text.secondary">
+              <FormattedMessage id="ownershipScope.uploadInheritNote" />
+            </Typography>
           )}
         </Stack>
       </DialogContent>

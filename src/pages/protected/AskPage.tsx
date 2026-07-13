@@ -47,6 +47,7 @@ import type { Vectros, FolderResponse } from '../../api/vectrosApi';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { drainPages } from '../../lib/drainPages';
 import { folderMenuItems } from '../../components/folderMenuItems';
+import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
 import { ModelPicker } from '../../components/ModelPicker';
 import { InferenceErrorAlert } from '../../components/InferenceErrorAlert';
 import { useInferenceModels } from '../../hooks/useInferenceModels';
@@ -90,6 +91,9 @@ export function AskPage(): React.JSX.Element {
     () => searchParams.get('folderId') ?? ALL_FOLDERS,
   );
   const [contentScope, setContentScope] = useState<ContentScope>('all');
+  // Ownership filter (`scope=<namespace>:<value>`) — the item OWNER, distinct
+  // from the folder + content-type retrieval controls. Applied when well-formed.
+  const [ownerScope, setOwnerScope] = useState('');
 
   const foldersQuery = useQuery({
     queryKey: dataQueryKeys.folders(tenant, context),
@@ -126,6 +130,8 @@ export function AskPage(): React.JSX.Element {
     const search: Vectros.RagSearch = {};
     if (scopeFolderId !== ALL_FOLDERS) search.folderId = scopeFolderId;
     if (contentScope !== 'all') search.contentTypes = [contentScope];
+    const ownerScopeParam = scopeFilterParam(ownerScope);
+    if (ownerScopeParam) search.scope = ownerScopeParam;
     return Object.keys(search).length > 0 ? search : undefined;
   };
 
@@ -197,6 +203,12 @@ export function AskPage(): React.JSX.Element {
             <FormattedMessage id="ai.ask.scopeRecords" />
           </ToggleButton>
         </ToggleButtonGroup>
+
+        <OwnershipScopeFilter
+          value={ownerScope}
+          onChange={setOwnerScope}
+          disabled={isStreaming}
+        />
       </Box>
 
       <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>

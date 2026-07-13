@@ -92,6 +92,37 @@ describe('RecordDetailPage', () => {
     expect(screen.getByRole('progressbar', { name: /loading record/i })).toBeInTheDocument();
   });
 
+  it('renders the ownership scopes as chips', async () => {
+    stubGetRecord(
+      vi.fn().mockResolvedValue({
+        id: 'rec_1',
+        typeName: 'intake_form',
+        version: 1,
+        payload: {},
+        scopes: ['org:org_acme', 'group:eng-team'],
+      }),
+    );
+    renderDetail();
+    await screen.findByRole('heading', { name: 'rec_1' });
+    expect(screen.getByText('org:org_acme')).toBeInTheDocument();
+    expect(screen.getByText('group:eng-team')).toBeInTheDocument();
+  });
+
+  it('shows "Private" for a record owned by the user alone (scopes: [])', async () => {
+    stubGetRecord(
+      vi.fn().mockResolvedValue({
+        id: 'rec_1',
+        typeName: 'intake_form',
+        version: 1,
+        payload: {},
+        scopes: [],
+      }),
+    );
+    renderDetail();
+    await screen.findByRole('heading', { name: 'rec_1' });
+    expect(screen.getByText(/private \(you only\)/i)).toBeInTheDocument();
+  });
+
   it('renders the record metadata and its payload as JSON', async () => {
     stubGetRecord(
       vi.fn().mockResolvedValue({
