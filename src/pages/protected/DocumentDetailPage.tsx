@@ -487,7 +487,7 @@ export function DocumentDetailPage(): React.JSX.Element {
             </MetaRow>
             <MetaRow label={intl.formatMessage({ id: 'documentDetail.fieldOwner' })}>
               <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                {doc.userId ?? doc.orgId ?? doc.clientId ?? '—'}
+                {doc.userId ?? '—'}
               </Typography>
             </MetaRow>
             <MetaRow label={intl.formatMessage({ id: 'documentDetail.fieldScopes' })}>

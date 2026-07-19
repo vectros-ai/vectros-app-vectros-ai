@@ -257,16 +257,27 @@ describe('temporal input value normalization', () => {
 });
 
 describe('reserved payload keys', () => {
-  it('flags the ownership ids + externalId as reserved', () => {
-    for (const key of ['externalId', 'partnerUserId', 'userId', 'clientId', 'orgId']) {
+  it('flags the reserved top-level keys (matches the backend reserved set)', () => {
+    for (const key of ['externalId', 'partnerUserId', 'userId', 'scopes']) {
       expect(isReservedPayloadKey(key)).toBe(true);
     }
     expect(isReservedPayloadKey('firstName')).toBe(false);
+    // The retired `orgId`/`clientId` ownership fields are NOT reserved — ownership
+    // is expressed through `scopes` now, so they are ordinary schema fields.
+    expect(isReservedPayloadKey('orgId')).toBe(false);
+    expect(isReservedPayloadKey('clientId')).toBe(false);
   });
 
-  it('strips reserved keys from a payload, keeping the rest and not mutating', () => {
-    const base = { firstName: 'Alice', externalId: 'x', orgId: 'o', userId: 'u', age: 30 };
-    expect(stripReservedPayloadKeys(base)).toEqual({ firstName: 'Alice', age: 30 });
+  it('strips reserved keys from a payload, keeping the rest (incl. a now-unreserved orgId) and not mutating', () => {
+    const base = {
+      firstName: 'Alice',
+      externalId: 'x',
+      scopes: ['org:o'],
+      userId: 'u',
+      orgId: 'o', // no longer reserved — must survive as an ordinary field
+      age: 30,
+    };
+    expect(stripReservedPayloadKeys(base)).toEqual({ firstName: 'Alice', orgId: 'o', age: 30 });
     // Input is untouched.
     expect(base.externalId).toBe('x');
   });

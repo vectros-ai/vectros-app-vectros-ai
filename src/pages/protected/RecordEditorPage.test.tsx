@@ -104,7 +104,7 @@ describe('RecordEditorPage — create', () => {
 
     // A raw payload that (wrongly) carries reserved top-level identifiers.
     fireEvent.change(screen.getByLabelText('Payload (JSON)'), {
-      target: { value: '{"firstName":"Alice","externalId":"x","orgId":"o","userId":"u"}' },
+      target: { value: '{"firstName":"Alice","externalId":"x","scopes":["org:o"],"userId":"u"}' },
     });
     await user.click(screen.getByRole('button', { name: 'Create record' }));
 

@@ -3,6 +3,15 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.9.0 — 2026-07-18
+
+### Changed
+
+- Updated to `@vectros-ai/sdk` 0.35.0. A record's or document's ownership is now
+  carried entirely by its ownership scopes (shown as chips on the detail pages);
+  the retired `orgId`/`clientId` fields are gone. The Owner row shows the owning
+  user, or a dash when an item is owned only by scopes.
+
 ## 0.8.0 — 2026-07-11
 
 ### Added

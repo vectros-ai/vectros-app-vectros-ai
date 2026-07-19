@@ -317,7 +317,7 @@ export function RecordDetailPage(): React.JSX.Element {
             </MetaRow>
             <MetaRow label={intl.formatMessage({ id: 'recordDetail.fieldOwner' })}>
               <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
-                {record.userId ?? record.orgId ?? record.clientId ?? '—'}
+                {record.userId ?? '—'}
               </Typography>
             </MetaRow>
             <MetaRow label={intl.formatMessage({ id: 'recordDetail.fieldScopes' })}>

@@ -181,8 +181,7 @@ const RESERVED_PAYLOAD_KEYS: ReadonlySet<string> = new Set([
   'externalId',
   'partnerUserId',
   'userId',
-  'clientId',
-  'orgId',
+  'scopes',
 ]);
 
 /** Whether `key` is a reserved top-level identifier that must not live in a payload. */
