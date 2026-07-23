@@ -90,6 +90,7 @@ import { formatBytes } from '../../lib/formatBytes';
 import { FolderEditorDialog } from '../../components/FolderEditorDialog';
 import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
 import { OwnershipScopeChips } from '../../components/OwnershipScopeChips';
+import { IndexStatusChip } from '../../components/IndexStatusChip';
 import { LookupPanel } from '../../components/LookupPanel';
 import type { AppliedLookup, LookupFieldDef } from '../../components/LookupPanel';
 import { AddDocumentDialog } from '../../components/AddDocumentDialog';
@@ -684,11 +685,10 @@ export function DocumentsPage(): React.JSX.Element {
                       <TableCell>{documentStatusLabel(intl, d.status)}</TableCell>
                       <TableCell>
                         {d.indexStatus ? (
-                          <Chip
-                            size="small"
-                            variant="outlined"
+                          <IndexStatusChip
                             label={documentIndexStatusLabel(intl, d.indexStatus)}
                             color={documentIndexStatusColor(d.indexStatus)}
+                            failureMessage={d.indexFailure?.message}
                           />
                         ) : (
                           '—'

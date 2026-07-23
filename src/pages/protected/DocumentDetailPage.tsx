@@ -73,6 +73,7 @@ import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { RequestIdCaption } from '../../components/RequestIdCaption';
 import { VersionHistory } from '../../components/VersionHistory';
 import { OwnershipScopeChips } from '../../components/OwnershipScopeChips';
+import { IndexFailureAlert } from '../../components/IndexFailureAlert';
 
 export function DocumentDetailPage(): React.JSX.Element {
   const tenant = useActiveTenantId();
@@ -471,6 +472,7 @@ export function DocumentDetailPage(): React.JSX.Element {
                   />
                 )}
               </Stack>
+              <IndexFailureAlert indexStatus={doc.indexStatus} indexFailure={doc.indexFailure} />
             </MetaRow>
             <MetaRow label={intl.formatMessage({ id: 'documentDetail.fieldIndexMode' })}>
               <Typography variant="body2">{doc.indexMode ?? '—'}</Typography>

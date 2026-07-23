@@ -34,6 +34,7 @@ import { deriveReferenceFields, referenceValues } from '../../lib/recordReferenc
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { ReferenceLink } from '../../components/ReferenceLink';
 import { OwnershipScopeChips } from '../../components/OwnershipScopeChips';
+import { IndexFailureAlert } from '../../components/IndexFailureAlert';
 import { RequestIdCaption } from '../../components/RequestIdCaption';
 import { VersionHistory } from '../../components/VersionHistory';
 
@@ -295,6 +296,10 @@ export function RecordDetailPage(): React.JSX.Element {
                   />
                 )}
               </Stack>
+              <IndexFailureAlert
+                indexStatus={record.indexStatus}
+                indexFailure={record.indexFailure}
+              />
             </MetaRow>
             <MetaRow label={intl.formatMessage({ id: 'recordDetail.fieldSchema' })}>
               {record.schemaId ? (

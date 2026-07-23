@@ -219,6 +219,7 @@
   "documents.index.SKIPPED": "Not indexed",
   "documents.index.STORED": "Stored only",
   "documents.index.FAILED": "Failed",
+  "index.failure.noReason": "Indexing failed. Retry, and contact support if it persists.",
   "documents.newFolder": "New folder",
   "documents.refresh": "Refresh documents",
   "documents.subtitle": "Browse the documents in the selected context. Pick a type to see its documents with their metadata, filter by folder or look them up by a field, then open a document to read it in the app or download the original.",

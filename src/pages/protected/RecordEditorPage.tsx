@@ -56,6 +56,7 @@ import { listAllSchemas } from '../../lib/listAllSchemas';
 import { schemasForSurface } from '../../lib/schemaSurfaces';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { formatRecordPayload, isVersionConflict, parseRecordPayload } from '../../lib/recordEditor';
+import { extractErrorMessage } from '../../lib/apiError';
 import {
   coerceFieldValue,
   isFormEditable,
@@ -244,6 +245,11 @@ export function RecordEditorPage(): React.JSX.Element {
     },
   });
 
+  // The server's message on a save failure is actionable — e.g. a 400 naming an
+  // out-of-range number field and telling you to send large whole numbers as
+  // strings. Surface it beneath the generic title rather than dropping it.
+  const saveErrorDetail = extractErrorMessage(saveMutation.error);
+
   // Conflict recovery — discard local edits and reseed from the server's latest.
   const handleReloadLatest = async (): Promise<void> => {
     const result = await recordQuery.refetch();
@@ -373,6 +379,11 @@ export function RecordEditorPage(): React.JSX.Element {
       {saveMutation.isError && !conflict && (
         <ApiErrorAlert error={saveMutation.error}>
           <FormattedMessage id="recordEditor.saveError" />
+          {saveErrorDetail && (
+            <Typography variant="caption" component="p" sx={{ mt: 0.5, opacity: 0.85 }}>
+              {saveErrorDetail}
+            </Typography>
+          )}
         </ApiErrorAlert>
       )}
 

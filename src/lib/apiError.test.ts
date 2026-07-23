@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { extractRequestId, statusCodeOf } from './apiError';
+import { extractErrorMessage, extractRequestId, statusCodeOf } from './apiError';
 
 describe('extractRequestId', () => {
   it('reads requestId from a well-formed error envelope', () => {
@@ -35,6 +35,40 @@ describe('extractRequestId', () => {
     expect(extractRequestId(undefined)).toBeUndefined();
     expect(extractRequestId('boom')).toBeUndefined();
     expect(extractRequestId({ body: null })).toBeUndefined();
+  });
+});
+
+describe('extractErrorMessage', () => {
+  it('reads the client-facing message from a well-formed error envelope', () => {
+    const err = {
+      statusCode: 400,
+      body: { message: "Field 'count' is outside the signed 64-bit range.", requestId: 'r-1' },
+    };
+    expect(extractErrorMessage(err)).toBe("Field 'count' is outside the signed 64-bit range.");
+  });
+
+  it('trims surrounding whitespace', () => {
+    expect(extractErrorMessage({ body: { message: '  spaced  ' } })).toBe('spaced');
+  });
+
+  it('returns undefined for a whitespace-only or empty message', () => {
+    expect(extractErrorMessage({ body: { message: '   ' } })).toBeUndefined();
+    expect(extractErrorMessage({ body: { message: '' } })).toBeUndefined();
+  });
+
+  it('returns undefined when the body has no message', () => {
+    expect(extractErrorMessage({ body: { requestId: 'r-1' } })).toBeUndefined();
+  });
+
+  it('returns undefined for a non-string message', () => {
+    expect(extractErrorMessage({ body: { message: 42 } })).toBeUndefined();
+  });
+
+  it('returns undefined for a non-API error (network/abort) or null/undefined', () => {
+    expect(extractErrorMessage(new Error('Network down'))).toBeUndefined();
+    expect(extractErrorMessage(null)).toBeUndefined();
+    expect(extractErrorMessage(undefined)).toBeUndefined();
+    expect(extractErrorMessage({ body: null })).toBeUndefined();
   });
 });
 

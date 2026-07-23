@@ -52,13 +52,15 @@ function stubGetRecord(getRecord: (req: { id: string }) => Promise<unknown>): vo
 function stubFull(opts: {
   getRecord: (req: { id: string }) => Promise<unknown>;
   listSchemas?: () => Promise<unknown>;
-  lookupRecords?: (req: { type: string; field: string; value: string }) => Promise<unknown>;
+  lookupRecordsByBody?: (req: { type: string; field: string; value: string }) => Promise<unknown>;
   getRecordVersions?: (req: { id: string }) => Promise<unknown>;
 }): void {
   mockedClient.mockReturnValue({
     records: {
       getRecord: opts.getRecord,
-      lookupRecords: opts.lookupRecords ?? vi.fn().mockResolvedValue(pageOf([])),
+      // ReferenceLink resolves via the POST-body lookup (lookupRecordsByBody),
+      // not the GET variant — the stub must match the method the code calls.
+      lookupRecordsByBody: opts.lookupRecordsByBody ?? vi.fn().mockResolvedValue(pageOf([])),
       getRecordVersions: opts.getRecordVersions ?? vi.fn().mockResolvedValue(pageOf([])),
     },
     schemas: { listSchemas: opts.listSchemas ?? vi.fn().mockResolvedValue(pageOf([])) },
@@ -311,7 +313,7 @@ describe('RecordDetailPage', () => {
   });
 
   it('renders a reference field as a cross-link to the resolved target record', async () => {
-    const lookupRecords = vi
+    const lookupRecordsByBody = vi
       .fn()
       .mockResolvedValue(pageOf([{ id: 'emp_99', typeName: 'employee' }]));
     stubFull({
@@ -338,14 +340,14 @@ describe('RecordDetailPage', () => {
           },
         ]),
       ),
-      lookupRecords,
+      lookupRecordsByBody,
     });
 
     renderDetail();
 
     const link = await screen.findByRole('link', { name: 'mgr-ext-1' });
     expect(link).toHaveAttribute('href', '/records/emp_99');
-    expect(lookupRecords).toHaveBeenCalledWith({
+    expect(lookupRecordsByBody).toHaveBeenCalledWith({
       type: 'employee',
       field: 'externalId',
       value: 'mgr-ext-1',
@@ -370,7 +372,7 @@ describe('RecordDetailPage', () => {
           },
         ]),
       ),
-      lookupRecords: vi.fn().mockResolvedValue(pageOf([])), // no match
+      lookupRecordsByBody: vi.fn().mockResolvedValue(pageOf([])), // no match
     });
 
     renderDetail();
@@ -382,7 +384,7 @@ describe('RecordDetailPage', () => {
   });
 
   it('renders each value of a cardinality-many reference as its own cross-link', async () => {
-    const lookupRecords = vi.fn((req: { type: string; field: string; value: string }) =>
+    const lookupRecordsByBody = vi.fn((req: { type: string; field: string; value: string }) =>
       Promise.resolve(
         pageOf(req.value === 'a' ? [{ id: 'rec_a' }] : req.value === 'b' ? [{ id: 'rec_b' }] : []),
       ),
@@ -412,7 +414,7 @@ describe('RecordDetailPage', () => {
           },
         ]),
       ),
-      lookupRecords,
+      lookupRecordsByBody,
     });
 
     renderDetail();
@@ -425,8 +427,8 @@ describe('RecordDetailPage', () => {
       'href',
       '/records/rec_b',
     );
-    expect(lookupRecords).toHaveBeenCalledWith({ type: 'tag', field: 'slug', value: 'a' });
-    expect(lookupRecords).toHaveBeenCalledWith({ type: 'tag', field: 'slug', value: 'b' });
+    expect(lookupRecordsByBody).toHaveBeenCalledWith({ type: 'tag', field: 'slug', value: 'a' });
+    expect(lookupRecordsByBody).toHaveBeenCalledWith({ type: 'tag', field: 'slug', value: 'b' });
   });
 
   it('renders an object-valued displayField title as compact JSON, not [object Object]', async () => {

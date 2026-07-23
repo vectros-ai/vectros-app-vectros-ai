@@ -3,6 +3,35 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.10.0 — 2026-07-22
+
+### Added
+
+- **A failed index now explains itself.** When a record or document has an index
+  status of Failed, the detail page shows the reason and whether the content is
+  still partly findable (several failures leave one search leg serving it); the
+  records and documents lists show the reason on hover. A failure with no reason
+  attached falls back to a generic "retry, and contact support if it persists."
+- **A failed record save shows the server's reason.** Creating or editing a
+  record that the API rejects now shows the specific explanation — for example, a
+  field whose number falls outside the supported range, with the suggestion to
+  send large whole numbers as strings — beneath the generic message, instead of
+  dropping it.
+
+### Security
+
+- Pin `fast-xml-parser` to a non-vulnerable version (`^5.10.1`) via an override —
+  above a published denial-of-service advisory in a transitive dependency.
+
+## 0.9.1 — 2026-07-20
+
+### Fixed
+
+- Reference fields that point at a **sensitive** lookup field now resolve to a
+  link on the record detail page. Previously the lookup behind those links was
+  rejected, so the reference stayed unresolved and the value rendered as plain
+  text with no way to reach the target record.
+
 ## 0.9.0 — 2026-07-18
 
 ### Changed

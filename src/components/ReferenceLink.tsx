@@ -3,8 +3,12 @@
 // renders a cross-link to that record's detail.
 //
 // A reference stores the target's lookup-field value (e.g. an externalId), not
-// the target record's id — so we resolve via `lookupRecords(type, field, value)`
-// to get the id the detail route needs. One <ReferenceLink> per value (the
+// the target record's id — so we resolve via
+// `lookupRecordsByBody(type, field, value)` to get the id the detail route
+// needs. The POST-body form is required, not stylistic: a SENSITIVE lookup
+// field cannot be resolved through the GET variant (its value would ride the
+// URL query string into access and proxy logs, so the API rejects it with a
+// 400). One <ReferenceLink> per value (the
 // parent renders an array for cardinality 'many'), so each owns exactly one
 // useQuery — rules-of-hooks safe regardless of how many values a field carries.
 //
@@ -48,8 +52,12 @@ export function ReferenceLink({
 
   const lookupQuery = useQuery({
     queryKey: dataQueryKeys.recordLookup(tenant, context, targetTypeName, targetField, value),
+    // POST-body lookup, not the GET variant: a SENSITIVE lookup field can only be
+    // resolved through the body (the GET rejects it with a 400, because the value
+    // would otherwise ride the URL query string into access and proxy logs). The
+    // GET path left every reference to a sensitive field permanently unresolved.
     queryFn: () =>
-      vectrosApiClient(tenant, context).records.lookupRecords({
+      vectrosApiClient(tenant, context).records.lookupRecordsByBody({
         type: targetTypeName,
         field: targetField,
         value,
@@ -59,8 +67,8 @@ export function ReferenceLink({
     staleTime: 30_000,
   });
 
-  // lookupRecords returns the `{ data, nextCursor }` page envelope; the first
-  // matching record (if any) is the reference target.
+  // lookupRecordsByBody returns the `{ data, nextCursor }` page envelope; the
+  // first matching record (if any) is the reference target.
   const targetId = lookupQuery.data?.data?.[0]?.id;
 
   if (targetId !== undefined && targetId !== '') {

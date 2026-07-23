@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // ReferenceLink — the reference cross-link resolution UX. Resolves a
-// reference value to its target record via lookupRecords and renders a link;
+// reference value to its target record via lookupRecordsByBody and renders a link;
 // degrades to plain text (never a dead link) while pending or when unresolved.
 // ---------------------------------------------------------------------------
 
@@ -30,9 +30,9 @@ const OWNER: TenantMembership = {
 };
 
 function stubLookup(
-  lookupRecords: (req: { type: string; field: string; value: string }) => Promise<unknown>,
+  lookupRecordsByBody: (req: { type: string; field: string; value: string }) => Promise<unknown>,
 ): void {
-  mockedClient.mockReturnValue({ records: { lookupRecords } } as never);
+  mockedClient.mockReturnValue({ records: { lookupRecordsByBody } } as never);
 }
 
 function renderLink(
@@ -60,20 +60,48 @@ describe('ReferenceLink', () => {
   beforeEach(() => mockedClient.mockReset());
 
   it('resolves the value to a link to the target record detail', async () => {
-    const lookupRecords = vi
+    const lookupRecordsByBody = vi
       .fn()
       .mockResolvedValue(pageOf([{ id: 'emp_99', typeName: 'employee' }]));
-    stubLookup(lookupRecords);
+    stubLookup(lookupRecordsByBody);
 
     renderLink();
 
     const link = await screen.findByRole('link', { name: 'mgr-ext-1' });
     expect(link).toHaveAttribute('href', '/records/emp_99');
-    expect(lookupRecords).toHaveBeenCalledWith({
+    expect(lookupRecordsByBody).toHaveBeenCalledWith({
       type: 'employee',
       field: 'externalId',
       value: 'mgr-ext-1',
     });
+  });
+
+  it('resolves through the POST-body lookup, never the GET variant', async () => {
+    // A reference whose target field is SENSITIVE can only be resolved through
+    // the body form — the GET variant rejects it with a 400 because the value
+    // would ride the URL query string. Calling the GET form left every such
+    // reference permanently unresolved (rendered as raw text, no link), so the
+    // method identity here IS the fix: assert the GET form is never reachable.
+    const lookupRecordsByBody = vi
+      .fn()
+      .mockResolvedValue(pageOf([{ id: 'emp_42', typeName: 'employee' }]));
+    const lookupRecords = vi.fn(() => {
+      throw new Error('the GET lookup 400s for a sensitive field — must not be called');
+    });
+    mockedClient.mockReturnValue({
+      records: { lookupRecordsByBody, lookupRecords },
+    } as never);
+
+    renderLink({ targetTypeName: 'employee', targetField: 'ssn', value: '123-45-6789' });
+
+    const link = await screen.findByRole('link', { name: '123-45-6789' });
+    expect(link).toHaveAttribute('href', '/records/emp_42');
+    expect(lookupRecordsByBody).toHaveBeenCalledWith({
+      type: 'employee',
+      field: 'ssn',
+      value: '123-45-6789',
+    });
+    expect(lookupRecords).not.toHaveBeenCalled();
   });
 
   it('shows the raw value as plain text (never a dead link) when unresolved', async () => {

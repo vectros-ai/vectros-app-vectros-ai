@@ -1,8 +1,9 @@
 // ---------------------------------------------------------------------------
 // Schema-surface filtering — one place for "which schemas define types on THIS
 // surface?". A schema declares, via `allowedSurfaces`, which typed surfaces
-// may bind it (record, document, user, org, client — always present, required
-// at write time). The records explorer/editor must only offer record-surface
+// may bind it (record, document, user, entity — always present, required at
+// write time; identity entities in every namespace bind under the single
+// `entity` surface). The records explorer/editor must only offer record-surface
 // types and the documents view only document-surface types; without the
 // filter, a document-only type leaks into the records type picker (and vice
 // versa) and every interaction with it 4xxs against the API.

@@ -120,6 +120,64 @@ describe('RecordEditorPage — create', () => {
     );
   });
 
+  it('surfaces the server error message on a failed save (e.g. a 64-bit 400)', async () => {
+    const user = userEvent.setup();
+    const createRecord = vi.fn().mockRejectedValue(
+      Object.assign(new Error('Bad Request'), {
+        statusCode: 400,
+        body: {
+          message:
+            "Field 'count' is outside the signed 64-bit range. Send large whole numbers as strings.",
+          requestId: 'req-400-xyz',
+        },
+      }),
+    );
+    const listSchemas = vi
+      .fn()
+      .mockResolvedValue(
+        pageOf([
+          { id: 'schema_abc', allowedSurfaces: ['record'], typeName: 'intake_form', displayName: 'Intake' },
+        ]),
+      );
+    renderEditor('/records/new', { schemas: { listSchemas }, records: { createRecord } });
+
+    await user.click(await screen.findByLabelText('Record type'));
+    await user.click(await screen.findByRole('option', { name: 'Intake' }));
+    fireEvent.change(screen.getByLabelText('Payload (JSON)'), {
+      target: { value: '{"count":123}' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Create record' }));
+
+    // The actionable server detail is shown, not just a generic "couldn't save".
+    expect(await screen.findByText(/outside the signed 64-bit range/i)).toBeInTheDocument();
+  });
+
+  it('shows only the generic message when the error carries no server detail', async () => {
+    const user = userEvent.setup();
+    const createRecord = vi.fn().mockRejectedValue(
+      // A failure with no body.message (e.g. a network error) — the detail
+      // caption must be omitted, leaving just the generic copy.
+      Object.assign(new Error('Network down'), { statusCode: 500 }),
+    );
+    const listSchemas = vi
+      .fn()
+      .mockResolvedValue(
+        pageOf([
+          { id: 'schema_abc', allowedSurfaces: ['record'], typeName: 'intake_form', displayName: 'Intake' },
+        ]),
+      );
+    renderEditor('/records/new', { schemas: { listSchemas }, records: { createRecord } });
+
+    await user.click(await screen.findByLabelText('Record type'));
+    await user.click(await screen.findByRole('option', { name: 'Intake' }));
+    fireEvent.change(screen.getByLabelText('Payload (JSON)'), {
+      target: { value: '{"count":123}' },
+    });
+    await user.click(screen.getByRole('button', { name: 'Create record' }));
+
+    expect(await screen.findByText(/couldn't save this record/i)).toBeInTheDocument();
+  });
+
   it('sends a Private ownership as scopes:[]', async () => {
     const user = userEvent.setup();
     const createRecord = vi.fn().mockResolvedValue({ id: 'rec_new', typeName: 'intake_form' });

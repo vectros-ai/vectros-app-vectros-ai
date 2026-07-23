@@ -5,7 +5,8 @@
 // (`targetTypeName`) and resolves against that type's lookup field
 // (`targetField`, default `externalId`). `cardinality` is 'one' (a single id)
 // or 'many' (an array). The detail view resolves each stored value through the
-// `lookupRecords` API to get the target record's id, then links to its detail.
+// `lookupRecordsByBody` API to get the target record's id, then links to its
+// detail (the POST-body form — the GET variant refuses a sensitive field).
 //
 // Kept framework-free so the field selection + value normalization are unit
 // testable; the React `<ReferenceLink>` component consumes these.

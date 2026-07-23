@@ -24,7 +24,6 @@ import {
   Alert,
   Box,
   Button,
-  Chip,
   FormControl,
   InputLabel,
   Link,
@@ -66,6 +65,7 @@ import {
 import type { SortDirection } from '../../lib/recordColumns';
 import { fieldLabel } from '../../lib/recordForm';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
+import { IndexStatusChip } from '../../components/IndexStatusChip';
 import { LookupPanel } from '../../components/LookupPanel';
 import type { AppliedLookup, LookupFieldDef } from '../../components/LookupPanel';
 import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
@@ -455,11 +455,10 @@ export function RecordsPage(): React.JSX.Element {
                           <TableCell>{recordStatusLabel(intl, r.status)}</TableCell>
                           <TableCell>
                             {r.indexStatus ? (
-                              <Chip
-                                size="small"
+                              <IndexStatusChip
                                 label={indexStatusLabel(intl, r.indexStatus)}
                                 color={indexStatusColor(r.indexStatus)}
-                                variant="outlined"
+                                failureMessage={r.indexFailure?.message}
                               />
                             ) : (
                               '—'
