@@ -30,3 +30,26 @@ export function schemasForSurface(
       (s.allowedSurfaces ?? []).some((declared) => declared === surface),
   );
 }
+
+/**
+ * Collapse to one entry per distinct `typeName` (first occurrence wins).
+ *
+ * A `typeName` can now have several schemas: a lineage's shared base plus a
+ * caller's own `basedOn` variant. A TYPE picker built directly off the
+ * raw list would render one option per schema row — duplicate React keys
+ * (both rows share the same `typeName`) collapsed to a single, unselectable
+ * value. Callers that need "the record type" pick from this deduped list, then
+ * resolve the caller's own specific schema for that type via the
+ * `recordType`-filtered lookup (which the API already shadows by ownership),
+ * never by re-matching `typeName` against this raw array.
+ */
+export function distinctTypes<T extends TypedSchema>(schemas: ReadonlyArray<T>): T[] {
+  const seen = new Set<string>();
+  const result: T[] = [];
+  for (const s of schemas) {
+    if (seen.has(s.typeName)) continue;
+    seen.add(s.typeName);
+    result.push(s);
+  }
+  return result;
+}

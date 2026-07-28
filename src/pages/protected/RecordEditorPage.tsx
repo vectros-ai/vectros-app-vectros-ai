@@ -53,7 +53,7 @@ import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
 import type { RecordResponse, SchemaResponse, Vectros } from '../../api/vectrosApi';
 import { listAllSchemas } from '../../lib/listAllSchemas';
-import { schemasForSurface } from '../../lib/schemaSurfaces';
+import { distinctTypes, schemasForSurface } from '../../lib/schemaSurfaces';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { formatRecordPayload, isVersionConflict, parseRecordPayload } from '../../lib/recordEditor';
 import { extractErrorMessage } from '../../lib/apiError';
@@ -69,9 +69,6 @@ import { RecordFormFields } from '../../components/RecordFormFields';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { OwnershipScopeField } from '../../components/OwnershipScopeField';
 import type { OwnershipScopeSelection } from '../../components/OwnershipScopeField';
-
-/** A schema usable as a create target: id + typeName are present. */
-type CreatableSchema = SchemaResponse & { readonly id: string; readonly typeName: string };
 
 export function RecordEditorPage(): React.JSX.Element {
   const tenant = useActiveTenantId();
@@ -91,7 +88,11 @@ export function RecordEditorPage(): React.JSX.Element {
   const [payloadText, setPayloadText] = useState('{}');
   const [baseVersion, setBaseVersion] = useState<number | undefined>(undefined);
   const [seeded, setSeeded] = useState(false);
-  const [selectedSchemaId, setSelectedSchemaId] = useState('');
+  // CREATE: the chosen record TYPE, not a schema id — a type can now have more
+  // than one schema (a lineage's shared base plus the caller's own `basedOn`
+  // variant), so the picker offers one option per distinct type name and
+  // the actual governing schema is resolved separately below.
+  const [selectedTypeName, setSelectedTypeName] = useState('');
   const [externalId, setExternalId] = useState('');
   // Ownership scopes chosen at create time (create-only; ownership is immutable
   // after create). `scopes: undefined` = inherit the token's identity.
@@ -110,10 +111,24 @@ export function RecordEditorPage(): React.JSX.Element {
     queryFn: () => listAllSchemas(tenant, context),
     enabled: mode === 'create',
   });
-  const creatableSchemas: ReadonlyArray<CreatableSchema> = schemasForSurface(
-    schemasQuery.data ?? [],
-    'record',
-  ).filter((s): s is CreatableSchema => typeof s.id === 'string');
+  const creatableSchemas = schemasForSurface(schemasQuery.data ?? [], 'record');
+  // One option per distinct type name — never one per schema row (a base +
+  // the caller's own variant would otherwise render two indistinguishable,
+  // identically-labeled options for the same type).
+  const creatableTypeOptions = distinctTypes(creatableSchemas);
+  // The schema that actually governs `selectedTypeName` for THIS caller,
+  // resolved by name through the API's ownership-shadowing walk (the caller's
+  // own variant when one exists, otherwise the shared base) — never picked out
+  // of the raw list above, which is ambiguous once a type has more than one
+  // schema.
+  const resolvedSchemaQuery = useQuery({
+    queryKey: dataQueryKeys.schemaByType(tenant, context, selectedTypeName),
+    queryFn: async () =>
+      (
+        await vectrosApiClient(tenant, context).schemas.listSchemas({ recordType: selectedTypeName })
+      ).data?.[0],
+    enabled: mode === 'create' && selectedTypeName !== '',
+  });
 
   // EDIT: load the record to seed the editor + capture its version.
   const recordQuery = useQuery({
@@ -131,7 +146,7 @@ export function RecordEditorPage(): React.JSX.Element {
     enabled: mode === 'edit' && typeof editSchemaId === 'string' && editSchemaId !== '',
   });
   const activeSchema: SchemaResponse | undefined =
-    mode === 'create' ? creatableSchemas.find((s) => s.id === selectedSchemaId) : schemaQuery.data;
+    mode === 'create' ? resolvedSchemaQuery.data : schemaQuery.data;
   // Reserved identifier fields (externalId / ownership ids) are top-level record
   // fields, never payload entries — drop them so the form neither renders an
   // input for them nor writes them into the body the API would reject.
@@ -155,10 +170,11 @@ export function RecordEditorPage(): React.JSX.Element {
   // load (only if the user hasn't already chosen one), so "New record" from a
   // type-filtered list lands pre-set to that type.
   useEffect(() => {
-    if (mode !== 'create' || selectedSchemaId !== '' || !requestedType) return;
-    const match = creatableSchemas.find((s) => s.typeName === requestedType);
-    if (match) setSelectedSchemaId(match.id);
-  }, [mode, selectedSchemaId, requestedType, creatableSchemas]);
+    if (mode !== 'create' || selectedTypeName !== '' || !requestedType) return;
+    if (creatableTypeOptions.some((s) => s.typeName === requestedType)) {
+      setSelectedTypeName(requestedType);
+    }
+  }, [mode, selectedTypeName, requestedType, creatableTypeOptions]);
 
   const parsed = parseRecordPayload(payloadText);
 
@@ -190,12 +206,12 @@ export function RecordEditorPage(): React.JSX.Element {
       const payload = stripReservedPayloadKeys(parsed.value);
 
       if (mode === 'create') {
-        const schema = creatableSchemas.find((s) => s.id === selectedSchemaId);
-        if (!schema) throw new Error('no schema selected');
+        const schema = resolvedSchemaQuery.data;
+        if (!schema || typeof schema.id !== 'string') throw new Error('no schema selected');
         const trimmedExternalId = externalId.trim();
         return client.records.createRecord({
           body: {
-            typeName: schema.typeName,
+            typeName: schema.typeName ?? selectedTypeName,
             schemaId: schema.id,
             payload,
             ...(trimmedExternalId === '' ? {} : { externalId: trimmedExternalId }),
@@ -220,9 +236,7 @@ export function RecordEditorPage(): React.JSX.Element {
     },
     onSuccess: (saved) => {
       const typeName =
-        mode === 'create'
-          ? creatableSchemas.find((s) => s.id === selectedSchemaId)?.typeName
-          : (recordQuery.data?.typeName ?? saved.typeName);
+        mode === 'create' ? selectedTypeName : (recordQuery.data?.typeName ?? saved.typeName);
       if (typeName) {
         void queryClient.invalidateQueries({
           queryKey: dataQueryKeys.records(tenant, context, typeName),
@@ -329,7 +343,8 @@ export function RecordEditorPage(): React.JSX.Element {
     parsed.ok &&
     !saveMutation.isPending &&
     !formInvalid &&
-    (mode === 'edit' || (selectedSchemaId !== '' && scopeSel.valid));
+    (mode === 'edit' ||
+      (selectedTypeName !== '' && typeof resolvedSchemaQuery.data?.id === 'string' && scopeSel.valid));
 
   return (
     <Stack spacing={3}>
@@ -341,7 +356,7 @@ export function RecordEditorPage(): React.JSX.Element {
         />
       </Typography>
 
-      {mode === 'create' && schemasQuery.isSuccess && creatableSchemas.length === 0 && (
+      {mode === 'create' && schemasQuery.isSuccess && creatableTypeOptions.length === 0 && (
         <Alert severity="info">
           <FormattedMessage id="recordEditor.noSchemas" />
         </Alert>
@@ -395,7 +410,7 @@ export function RecordEditorPage(): React.JSX.Element {
                 <FormControl
                   size="small"
                   sx={{ maxWidth: 480 }}
-                  disabled={creatableSchemas.length === 0}
+                  disabled={creatableTypeOptions.length === 0}
                 >
                   <InputLabel id="record-editor-schema-label">
                     <FormattedMessage id="recordEditor.schemaLabel" />
@@ -403,11 +418,11 @@ export function RecordEditorPage(): React.JSX.Element {
                   <Select
                     labelId="record-editor-schema-label"
                     label={intl.formatMessage({ id: 'recordEditor.schemaLabel' })}
-                    value={selectedSchemaId}
-                    onChange={(e: SelectChangeEvent) => setSelectedSchemaId(e.target.value)}
+                    value={selectedTypeName}
+                    onChange={(e: SelectChangeEvent) => setSelectedTypeName(e.target.value)}
                   >
-                    {creatableSchemas.map((s) => (
-                      <MenuItem key={s.id} value={s.id}>
+                    {creatableTypeOptions.map((s) => (
+                      <MenuItem key={s.typeName} value={s.typeName}>
                         {s.displayName && s.displayName.length > 0 ? s.displayName : s.typeName}
                       </MenuItem>
                     ))}

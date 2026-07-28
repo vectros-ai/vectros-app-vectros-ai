@@ -51,7 +51,7 @@ function stubGetRecord(getRecord: (req: { id: string }) => Promise<unknown>): vo
 /** Stub records + schemas + a reference lookup (for the field-model views). */
 function stubFull(opts: {
   getRecord: (req: { id: string }) => Promise<unknown>;
-  listSchemas?: () => Promise<unknown>;
+  getSchema?: (req: { id: string }) => Promise<unknown>;
   lookupRecordsByBody?: (req: { type: string; field: string; value: string }) => Promise<unknown>;
   getRecordVersions?: (req: { id: string }) => Promise<unknown>;
 }): void {
@@ -63,7 +63,9 @@ function stubFull(opts: {
       lookupRecordsByBody: opts.lookupRecordsByBody ?? vi.fn().mockResolvedValue(pageOf([])),
       getRecordVersions: opts.getRecordVersions ?? vi.fn().mockResolvedValue(pageOf([])),
     },
-    schemas: { listSchemas: opts.listSchemas ?? vi.fn().mockResolvedValue(pageOf([])) },
+    // The page loads the record's OWN schema by its stamped schemaId, not by
+    // matching typeName against a listed set (see RecordDetailPage.tsx).
+    schemas: { getSchema: opts.getSchema ?? vi.fn().mockRejectedValue(new Error('no schema')) },
   } as never);
 }
 
@@ -285,23 +287,21 @@ describe('RecordDetailPage', () => {
   // --- field-model views: displayField title + reference cross-links -----
 
   it('uses the schema displayField value as the page title, keeping the id visible', async () => {
+    const getSchema = vi.fn().mockResolvedValue({
+      id: 's1',
+      typeName: 'intake_form',
+      fields: [{ fieldId: 'fullName', fieldType: 'string' }],
+      renderHints: { fullName: { displayField: true } },
+    });
     stubFull({
       getRecord: vi.fn().mockResolvedValue({
         id: 'rec_1',
         typeName: 'intake_form',
+        schemaId: 's1',
         version: 1,
         payload: { fullName: 'Ada Lovelace' },
       }),
-      listSchemas: vi.fn().mockResolvedValue(
-        pageOf([
-          {
-            id: 's1',
-            typeName: 'intake_form',
-            fields: [{ fieldId: 'fullName', fieldType: 'string' }],
-            renderHints: { fullName: { displayField: true } },
-          },
-        ]),
-      ),
+      getSchema,
     });
 
     renderDetail();
@@ -310,6 +310,10 @@ describe('RecordDetailPage', () => {
     expect(await screen.findByRole('heading', { name: 'Ada Lovelace' })).toBeInTheDocument();
     // ...and the id still appears (as the subtitle).
     expect(screen.getByText('rec_1')).toBeInTheDocument();
+    // The record's OWN stamped schemaId drives the lookup — never a typeName
+    // match against a raw list, which is ambiguous once a type has more than
+    // one schema (a lineage's shared base plus a caller's own variant).
+    expect(getSchema).toHaveBeenCalledWith({ id: 's1' });
   });
 
   it('renders a reference field as a cross-link to the resolved target record', async () => {
@@ -320,26 +324,23 @@ describe('RecordDetailPage', () => {
       getRecord: vi.fn().mockResolvedValue({
         id: 'rec_1',
         typeName: 'intake_form',
+        schemaId: 's1',
         version: 1,
         payload: { manager: 'mgr-ext-1' },
       }),
-      listSchemas: vi.fn().mockResolvedValue(
-        pageOf([
+      getSchema: vi.fn().mockResolvedValue({
+        id: 's1',
+        typeName: 'intake_form',
+        fields: [
           {
-            id: 's1',
-            typeName: 'intake_form',
-            fields: [
-              {
-                fieldId: 'manager',
-                fieldType: 'reference',
-                targetTypeName: 'employee',
-                targetField: 'externalId',
-              },
-            ],
-            renderHints: { manager: { label: 'Manager' } },
+            fieldId: 'manager',
+            fieldType: 'reference',
+            targetTypeName: 'employee',
+            targetField: 'externalId',
           },
-        ]),
-      ),
+        ],
+        renderHints: { manager: { label: 'Manager' } },
+      }),
       lookupRecordsByBody,
     });
 
@@ -359,19 +360,16 @@ describe('RecordDetailPage', () => {
       getRecord: vi.fn().mockResolvedValue({
         id: 'rec_1',
         typeName: 'intake_form',
+        schemaId: 's1',
         version: 1,
         payload: { manager: 'ghost' },
       }),
-      listSchemas: vi.fn().mockResolvedValue(
-        pageOf([
-          {
-            id: 's1',
-            typeName: 'intake_form',
-            fields: [{ fieldId: 'manager', fieldType: 'reference', targetTypeName: 'employee' }],
-            renderHints: {},
-          },
-        ]),
-      ),
+      getSchema: vi.fn().mockResolvedValue({
+        id: 's1',
+        typeName: 'intake_form',
+        fields: [{ fieldId: 'manager', fieldType: 'reference', targetTypeName: 'employee' }],
+        renderHints: {},
+      }),
       lookupRecordsByBody: vi.fn().mockResolvedValue(pageOf([])), // no match
     });
 
@@ -393,27 +391,24 @@ describe('RecordDetailPage', () => {
       getRecord: vi.fn().mockResolvedValue({
         id: 'rec_1',
         typeName: 'intake_form',
+        schemaId: 's1',
         version: 1,
         payload: { tags: ['a', 'b'] },
       }),
-      listSchemas: vi.fn().mockResolvedValue(
-        pageOf([
+      getSchema: vi.fn().mockResolvedValue({
+        id: 's1',
+        typeName: 'intake_form',
+        fields: [
           {
-            id: 's1',
-            typeName: 'intake_form',
-            fields: [
-              {
-                fieldId: 'tags',
-                fieldType: 'reference',
-                targetTypeName: 'tag',
-                targetField: 'slug',
-                cardinality: 'many',
-              },
-            ],
-            renderHints: { tags: { label: 'Tags' } },
+            fieldId: 'tags',
+            fieldType: 'reference',
+            targetTypeName: 'tag',
+            targetField: 'slug',
+            cardinality: 'many',
           },
-        ]),
-      ),
+        ],
+        renderHints: { tags: { label: 'Tags' } },
+      }),
       lookupRecordsByBody,
     });
 
@@ -436,19 +431,16 @@ describe('RecordDetailPage', () => {
       getRecord: vi.fn().mockResolvedValue({
         id: 'rec_1',
         typeName: 'intake_form',
+        schemaId: 's1',
         version: 1,
         payload: { meta: { x: 1 } },
       }),
-      listSchemas: vi.fn().mockResolvedValue(
-        pageOf([
-          {
-            id: 's1',
-            typeName: 'intake_form',
-            fields: [{ fieldId: 'meta', fieldType: 'object' }],
-            renderHints: { meta: { displayField: true } },
-          },
-        ]),
-      ),
+      getSchema: vi.fn().mockResolvedValue({
+        id: 's1',
+        typeName: 'intake_form',
+        fields: [{ fieldId: 'meta', fieldType: 'object' }],
+        renderHints: { meta: { displayField: true } },
+      }),
     });
 
     renderDetail();

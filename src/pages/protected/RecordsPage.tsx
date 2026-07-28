@@ -50,7 +50,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
 import type { RecordResponse } from '../../api/vectrosApi';
-import { schemasForSurface } from '../../lib/schemaSurfaces';
+import { distinctTypes, schemasForSurface } from '../../lib/schemaSurfaces';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { indexStatusColor, indexStatusLabel, recordStatusLabel } from '../../lib/recordLabels';
@@ -109,11 +109,29 @@ export function RecordsPage(): React.JSX.Element {
 
   // Schemas that declare a typeName AND bind to the RECORD surface are the
   // selectable types — a document-only schema must not leak into this picker
-  // (its records don't exist; every interaction with it would 4xx).
+  // (its records don't exist; every interaction with it would 4xx). A type
+  // may now have more than one schema (a lineage's shared base plus the
+  // caller's own `basedOn` variant) — the picker offers one entry per
+  // DISTINCT type name, never one per schema row.
   const schemas = schemasForSurface(schemasQuery.data ?? [], 'record');
+  const typeOptions = distinctTypes(schemas);
   // Effective type: the user's pick, else the first available type.
-  const effectiveType = selectedType ?? schemas[0]?.typeName ?? null;
-  const activeSchema = schemas.find((s) => s.typeName === effectiveType);
+  const effectiveType = selectedType ?? typeOptions[0]?.typeName ?? null;
+  // The schema that actually governs `effectiveType` for THIS caller — fetched
+  // by name, not picked out of the raw list above, so it resolves through the
+  // same ownership-shadowing walk the API applies everywhere else (the
+  // caller's own variant when one exists, otherwise the shared base). Picking
+  // by `schemas.find(s => s.typeName === effectiveType)` would be arbitrary
+  // once more than one schema can share that name.
+  const activeSchemaQuery = useQuery({
+    queryKey: dataQueryKeys.schemaByType(tenant, context, effectiveType ?? ''),
+    queryFn: async () =>
+      (
+        await vectrosApiClient(tenant, context).schemas.listSchemas({ recordType: effectiveType ?? '' })
+      ).data?.[0],
+    enabled: effectiveType !== null,
+  });
+  const activeSchema = activeSchemaQuery.data;
   const schemaFields = activeSchema?.fields ?? [];
 
   // Headline/displayField promotion: one field becomes the linked primary
@@ -305,7 +323,7 @@ export function RecordsPage(): React.JSX.Element {
                 value={effectiveType ?? ''}
                 onChange={handleTypeChange}
               >
-                {schemas.map((s) => (
+                {typeOptions.map((s) => (
                   <MenuItem key={s.typeName} value={s.typeName}>
                     {s.displayName && s.displayName.length > 0 ? s.displayName : s.typeName}
                   </MenuItem>

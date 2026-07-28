@@ -269,6 +269,44 @@ describe('RecordEditorPage — create', () => {
     );
   });
 
+  it('dedupes a base+variant pair sharing one typeName to a single option, and creates against the recordType-resolved schema (not an arbitrary raw-list row)', async () => {
+    const user = userEvent.setup();
+    const createRecord = vi.fn().mockResolvedValue({ id: 'rec_new', typeName: 'patient' });
+    // The raw (unfiltered) list carries BOTH a lineage base and the caller's
+    // own `basedOn` variant for "patient" — same typeName, different ids.
+    const listSchemas = vi.fn((req?: { recordType?: string }) => {
+      if (req?.recordType === 'patient') {
+        // The API's ownership-shadowing resolution: the caller's own variant.
+        return Promise.resolve(
+          pageOf([{ id: 'variant_1', basedOn: 'base_1', allowedSurfaces: ['record'], typeName: 'patient' }]),
+        );
+      }
+      return Promise.resolve(
+        pageOf([
+          { id: 'base_1', allowedSurfaces: ['record'], typeName: 'patient' },
+          { id: 'variant_1', basedOn: 'base_1', allowedSurfaces: ['record'], typeName: 'patient' },
+        ]),
+      );
+    });
+    renderEditor('/records/new', { schemas: { listSchemas }, records: { createRecord } });
+
+    // Exactly one "patient" option — no duplicate-key collision, no way to
+    // land on the wrong (unresolved) row.
+    await user.click(await screen.findByLabelText('Record type'));
+    expect(await screen.findAllByRole('option', { name: 'patient' })).toHaveLength(1);
+    await user.click(screen.getByRole('option', { name: 'patient' }));
+
+    fireEvent.change(screen.getByLabelText('Payload (JSON)'), { target: { value: '{}' } });
+    await user.click(screen.getByRole('button', { name: 'Create record' }));
+
+    // The create used the RESOLVED variant's id, never the base's.
+    await waitFor(() =>
+      expect(createRecord).toHaveBeenCalledWith({
+        body: { typeName: 'patient', schemaId: 'variant_1', payload: {} },
+      }),
+    );
+  });
+
   it('excludes document-only schemas from the create type picker', async () => {
     const user = userEvent.setup();
     const listSchemas = vi.fn().mockResolvedValue(

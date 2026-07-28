@@ -243,6 +243,47 @@ describe('DocumentsPage', () => {
     expect(within(table).queryByRole('link', { name: 'scratch.txt' })).not.toBeInTheDocument();
   });
 
+  it('shows documents under EITHER schema of a base+variant pair sharing one typeName (not just the resolved one)', async () => {
+    const user = userEvent.setup();
+    // A lineage base plus the caller's own `basedOn` variant, both typeName
+    // "decision" — documents exist under BOTH schema ids.
+    const BASE = { id: 's_base', typeName: 'decision', allowedSurfaces: ['document'], fields: [] };
+    const VARIANT = {
+      id: 's_variant',
+      basedOn: 's_base',
+      typeName: 'decision',
+      allowedSurfaces: ['document'],
+      fields: [{ fieldId: 'risk', fieldType: 'string' }],
+    };
+    const listSchemas = vi.fn((req?: { recordType?: string }) =>
+      req?.recordType === 'decision'
+        ? Promise.resolve(pageOf([VARIANT])) // the API's own ownership-shadowing resolution
+        : Promise.resolve(pageOf([BASE, VARIANT])),
+    );
+    stub({
+      schemas: listSchemas,
+      documents: vi.fn().mockResolvedValue(
+        pageOf([
+          { id: 'doc_base', title: 'base-doc.md', status: 'ACTIVE', schemaId: 's_base' },
+          { id: 'doc_variant', title: 'variant-doc.md', status: 'ACTIVE', schemaId: 's_variant' },
+        ]),
+      ),
+    });
+    renderPage();
+
+    await screen.findByRole('link', { name: 'base-doc.md' });
+    await user.click(screen.getByRole('combobox', { name: /document type/i }));
+    // Exactly one "decision" option — no duplicate-key collision.
+    expect(await screen.findAllByRole('option', { name: 'decision' })).toHaveLength(1);
+    await user.click(screen.getByRole('option', { name: 'decision' }));
+
+    // BOTH documents stay visible — filtering by typeName, not by the single
+    // resolved schema id, which would otherwise silently drop one of them.
+    const table = await screen.findByRole('table', { name: /documents/i });
+    expect(within(table).getByRole('link', { name: 'base-doc.md' })).toBeInTheDocument();
+    expect(within(table).getByRole('link', { name: 'variant-doc.md' })).toBeInTheDocument();
+  });
+
   it('filters typed documents by their filterable payload fields', async () => {
     const user = userEvent.setup();
     const second = {

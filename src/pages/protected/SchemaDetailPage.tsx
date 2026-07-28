@@ -17,6 +17,7 @@ import {
   Card,
   CardContent,
   Chip,
+  Link,
   Stack,
   Table,
   TableBody,
@@ -51,6 +52,17 @@ export function SchemaDetailPage(): React.JSX.Element {
     queryKey: dataQueryKeys.schema(tenant, context, schemaId),
     queryFn: () => vectrosApiClient(tenant, context).schemas.getSchema({ id: schemaId }),
     enabled: schemaId !== '',
+  });
+
+  // The lineage base this schema is a customization of, fetched by id
+  // for a friendly label — mirrors the record detail page's reference
+  // cross-links. Stays unset/undefined when this schema IS the base, or while
+  // its own load is still pending.
+  const basedOnId = schemaQuery.data?.basedOn;
+  const baseSchemaQuery = useQuery({
+    queryKey: dataQueryKeys.schema(tenant, context, basedOnId ?? ''),
+    queryFn: () => vectrosApiClient(tenant, context).schemas.getSchema({ id: basedOnId ?? '' }),
+    enabled: typeof basedOnId === 'string' && basedOnId !== '',
   });
 
   const backButton = (
@@ -123,6 +135,25 @@ export function SchemaDetailPage(): React.JSX.Element {
             </MetaRow>
             <MetaRow label={intl.formatMessage({ id: 'schemaDetail.fieldVersion' })}>
               <Typography variant="body2">{schema.schemaVersion ?? '—'}</Typography>
+            </MetaRow>
+            <MetaRow label={intl.formatMessage({ id: 'schemaDetail.fieldLineage' })}>
+              {schema.basedOn ? (
+                <Link component={RouterLink} to={`/schemas/${encodeURIComponent(schema.basedOn)}`}>
+                  <FormattedMessage
+                    id="schemaDetail.lineageVariantOf"
+                    values={{
+                      name:
+                        baseSchemaQuery.data?.displayName && baseSchemaQuery.data.displayName.length > 0
+                          ? baseSchemaQuery.data.displayName
+                          : (baseSchemaQuery.data?.typeName ?? schema.basedOn),
+                    }}
+                  />
+                </Link>
+              ) : (
+                <Typography variant="body2">
+                  <FormattedMessage id="schemaDetail.lineageBase" />
+                </Typography>
+              )}
             </MetaRow>
             <MetaRow label={intl.formatMessage({ id: 'schemaDetail.fieldActive' })}>
               <Chip

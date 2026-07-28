@@ -72,6 +72,7 @@ import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { drainPages } from '../../lib/drainPages';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { documentSurfaceSchemas, typeNameBySchemaId } from '../../lib/documentTypes';
+import { distinctTypes } from '../../lib/schemaSurfaces';
 import {
   deriveValueColumns,
   filterableFieldIds,
@@ -217,12 +218,33 @@ export function DocumentsPage(): React.JSX.Element {
   // untyped view's Type column.
   const allSchemas = schemasQuery.data ?? [];
   const documentTypes = documentSurfaceSchemas(allSchemas);
+  // One picker option per distinct type name — never one per schema row. A
+  // type can have more than one schema (a lineage's shared base plus the
+  // caller's own `basedOn` variant); a picker built off the raw list would
+  // render two indistinguishable, identically-keyed options.
+  const documentTypeOptions = distinctTypes(documentTypes);
   const typeNamesById = typeNameBySchemaId(allSchemas);
+  // A stale `?type=` naming no current document-surface type degrades to the
+  // all-types view rather than erroring or filtering to nothing.
+  const knownTypeNames = new Set(documentTypes.map((s) => s.typeName));
+  const effectiveType = selectedType !== null && knownTypeNames.has(selectedType) ? selectedType : null;
 
-  // The active type's schema (undefined in the all-types view). A stale `?type=`
-  // naming no current type degrades to the all-types view rather than erroring.
-  const activeSchema =
-    selectedType === null ? undefined : documentTypes.find((s) => s.typeName === selectedType);
+  // The schema that actually governs `effectiveType` for THIS caller — fetched
+  // by name through the API's ownership-shadowing walk (the caller's own
+  // variant when one exists, otherwise the shared base), never picked out of
+  // the raw list above, which is ambiguous once a type has more than one
+  // schema. Drives the typed view's columns/lookup fields only; which
+  // DOCUMENTS are in scope for the type is decided by typeName below,
+  // independent of which specific schema resolves here.
+  const activeSchemaQuery = useQuery({
+    queryKey: dataQueryKeys.schemaByType(tenant, context, effectiveType ?? ''),
+    queryFn: async () =>
+      (
+        await vectrosApiClient(tenant, context).schemas.listSchemas({ recordType: effectiveType ?? '' })
+      ).data?.[0],
+    enabled: effectiveType !== null,
+  });
+  const activeSchema = effectiveType === null ? undefined : activeSchemaQuery.data;
   const schemaFields = activeSchema?.fields ?? [];
   const valueColumns = deriveValueColumns(schemaFields, activeSchema?.renderHints);
   const filterFieldIds = filterableFieldIds(schemaFields);
@@ -267,7 +289,7 @@ export function DocumentsPage(): React.JSX.Element {
       return (
         (
           await vectrosApiClient(tenant, context).documents.lookupDocumentsByBody({
-            type: activeSchema.typeName,
+            type: activeSchema.typeName ?? effectiveType ?? '',
             field: appliedLookup.field,
             ...modeArgs,
             order: appliedLookup.order,
@@ -282,17 +304,23 @@ export function DocumentsPage(): React.JSX.Element {
   // Type scoping. With a lookup applied, the server already scoped the results
   // to the type (and the folder filter does NOT apply — a lookup runs over the
   // whole context). Otherwise it's client-side: a document carries only its
-  // schemaId, so the typed view keeps the documents bound to the active type's
-  // schema. The plain list is fully drained (not first-page-only), so this
-  // filter sees every document in the current folder scope. Known limit
+  // schemaId, so the typed view resolves each document's TYPE NAME via
+  // `typeNamesById` and matches it against `effectiveType` — NOT the resolved
+  // `activeSchema.id`. A type can now have more than one schema (a lineage's
+  // shared base plus the caller's own `basedOn` variant): matching by a
+  // single resolved schema id would silently DROP every document filed under
+  // the type's other schema from the typed view, rather than just mis-deriving
+  // its columns. The plain list is fully drained (not first-page-only), so
+  // this filter sees every document in the current folder scope. Known limit
   // (shared with the records explorer): a payload big enough to be
   // externalized arrives on LIST responses as only its inline projection
   // (lookup + filterable fields), so a non-filterable value column can show —
   // for such a row; the detail view's by-id GET always has the full payload.
   const typedDocuments = useMemo(() => {
     if (lookupActive) return lookupQuery.data ?? [];
-    return activeSchema ? documents.filter((d) => d.schemaId === activeSchema.id) : documents;
-  }, [lookupActive, lookupQuery.data, documents, activeSchema]);
+    if (effectiveType === null) return documents;
+    return documents.filter((d) => (d.schemaId ? typeNamesById.get(d.schemaId) : undefined) === effectiveType);
+  }, [lookupActive, lookupQuery.data, documents, effectiveType, typeNamesById]);
 
   // Apply the client-side filter (over filterable fields), then the active sort
   // — typed view only; the all-types view keeps the server's ordering.
@@ -431,13 +459,13 @@ export function DocumentsPage(): React.JSX.Element {
                   <Select
                     labelId="documents-type-label"
                     label={intl.formatMessage({ id: 'documents.typeLabel' })}
-                    value={activeSchema?.typeName ?? ALL_TYPES}
+                    value={effectiveType ?? ALL_TYPES}
                     onChange={handleTypeChange}
                   >
                     <MenuItem value={ALL_TYPES}>
                       {intl.formatMessage({ id: 'documents.allTypes' })}
                     </MenuItem>
-                    {documentTypes.map((s) => (
+                    {documentTypeOptions.map((s) => (
                       <MenuItem key={s.typeName} value={s.typeName}>
                         {s.displayName && s.displayName.length > 0 ? s.displayName : s.typeName}
                       </MenuItem>
@@ -764,7 +792,7 @@ export function DocumentsPage(): React.JSX.Element {
         open={addDocOpen}
         folders={folders}
         defaultFolderId={scopedFolderId}
-        defaultSchemaId={activeSchema?.id}
+        defaultTypeName={effectiveType ?? undefined}
         onClose={() => setAddDocOpen(false)}
       />
 

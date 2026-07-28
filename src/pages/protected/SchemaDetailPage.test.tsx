@@ -96,4 +96,42 @@ describe('SchemaDetailPage', () => {
     renderDetail();
     expect(await screen.findByText(/couldn.t load this schema/i)).toBeInTheDocument();
   });
+
+  // --- lineage (basedOn) ---------------------------------------------------
+
+  it('shows this schema is the shared base when basedOn is unset', async () => {
+    stubGetSchema(vi.fn().mockResolvedValue({ id: 's1', typeName: 'patient', schemaVersion: 1 }));
+    renderDetail();
+    expect(await screen.findByText(/shared base for this type/i)).toBeInTheDocument();
+  });
+
+  it('links to the lineage base by its display name when basedOn is set', async () => {
+    const getSchema = vi.fn((req: { id: string }) =>
+      Promise.resolve(
+        req.id === 's1'
+          ? { id: 's1', typeName: 'patient', basedOn: 'base_1', schemaVersion: 1 }
+          : { id: 'base_1', typeName: 'patient', displayName: 'Patient', schemaVersion: 1 },
+      ),
+    );
+    mockedClient.mockReturnValue({ schemas: { getSchema } } as never);
+
+    renderDetail();
+
+    const link = await screen.findByRole('link', { name: 'Customization of Patient' });
+    expect(link).toHaveAttribute('href', '/schemas/base_1');
+    expect(getSchema).toHaveBeenCalledWith({ id: 'base_1' });
+  });
+
+  it('falls back to the raw id when the base is not visible in this data-scope view', async () => {
+    const getSchema = vi.fn((req: { id: string }) =>
+      req.id === 's1'
+        ? Promise.resolve({ id: 's1', typeName: 'patient', basedOn: 'base_1', schemaVersion: 1 })
+        : Promise.reject(new Error('not found')),
+    );
+    mockedClient.mockReturnValue({ schemas: { getSchema } } as never);
+
+    renderDetail();
+
+    expect(await screen.findByRole('link', { name: 'Customization of base_1' })).toBeInTheDocument();
+  });
 });

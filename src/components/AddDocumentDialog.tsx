@@ -55,7 +55,7 @@ import type { FolderResponse } from '../api/vectrosApi';
 import { dataQueryKeys } from '../lib/dataQueryKeys';
 import { formatBytes } from '../lib/formatBytes';
 import { listAllSchemas } from '../lib/listAllSchemas';
-import { schemasForSurface } from '../lib/schemaSurfaces';
+import { distinctTypes, schemasForSurface } from '../lib/schemaSurfaces';
 import {
   coerceFieldValue,
   isReservedPayloadKey,
@@ -79,8 +79,8 @@ interface AddDocumentDialogProps {
   readonly folders: ReadonlyArray<FolderResponse>;
   /** Folder to pre-select as the upload target (the list's current folder). */
   readonly defaultFolderId?: string | undefined;
-  /** Document type (schema id) to pre-select — the list's active type view. */
-  readonly defaultSchemaId?: string | undefined;
+  /** Document type to pre-select — the list's active type view. */
+  readonly defaultTypeName?: string | undefined;
   readonly onClose: () => void;
 }
 
@@ -88,7 +88,7 @@ export function AddDocumentDialog({
   open,
   folders,
   defaultFolderId,
-  defaultSchemaId,
+  defaultTypeName,
   onClose,
 }: AddDocumentDialogProps): React.JSX.Element {
   const tenant = useActiveTenantId();
@@ -107,7 +107,11 @@ export function AddDocumentDialog({
   // answerable. Text ingest always retains its body, so this does not apply there.
   const [storeText, setStoreText] = useState(true);
   const [folderId, setFolderId] = useState<string>(NO_FOLDER);
-  const [schemaId, setSchemaId] = useState<string>(NO_TYPE);
+  // The chosen document TYPE, not a schema id — a type can have more than one
+  // schema (a lineage's shared base plus the caller's own `basedOn` variant),
+  // so the picker offers one option per distinct type name and the actual
+  // schema to bind is resolved separately below.
+  const [selectedTypeName, setSelectedTypeName] = useState<string>(NO_TYPE);
   // Typed metadata (the document `payload`), edited via the schema-driven form
   // when a type is selected. Reset alongside the type — fields belong to it.
   const [payload, setPayload] = useState<Record<string, unknown>>({});
@@ -130,7 +134,24 @@ export function AddDocumentDialog({
     queryFn: () => listAllSchemas(tenant, context),
   });
   const docTypes = schemasForSurface(schemasQuery.data ?? [], 'document');
-  const activeSchema = docTypes.find((s) => s.id !== undefined && s.id === schemaId);
+  // One picker option per distinct type name — never one per schema row (a
+  // base + the caller's own variant would otherwise render two
+  // indistinguishable, identically-labeled options for the same type).
+  const docTypeOptions = distinctTypes(docTypes);
+  // The schema that actually governs `selectedTypeName` for THIS caller,
+  // resolved by name through the API's ownership-shadowing walk (the caller's
+  // own variant when one exists, otherwise the shared base) — never picked
+  // out of the raw list above, which is ambiguous once a type has more than
+  // one schema.
+  const resolvedSchemaQuery = useQuery({
+    queryKey: dataQueryKeys.schemaByType(tenant, context, selectedTypeName),
+    queryFn: async () =>
+      (
+        await vectrosApiClient(tenant, context).schemas.listSchemas({ recordType: selectedTypeName })
+      ).data?.[0],
+    enabled: selectedTypeName !== NO_TYPE,
+  });
+  const activeSchema = resolvedSchemaQuery.data;
   // Reserved identifier keys (externalId / ownership ids) are top-level
   // document fields, never payload entries — keep them out of the form.
   const schemaFields = (activeSchema?.fields ?? []).filter(
@@ -151,23 +172,26 @@ export function AddDocumentDialog({
     setStoreText(true);
     setFolderId(defaultFolderId ?? NO_FOLDER);
     // Adding from a by-type view pre-selects that type (still changeable).
-    setSchemaId(defaultSchemaId ?? NO_TYPE);
+    setSelectedTypeName(defaultTypeName ?? NO_TYPE);
     setPayload({});
     setExternalId('');
     setUpsert(false);
     setExistingUnchanged(false);
-  }, [open, defaultFolderId, defaultSchemaId]);
+  }, [open, defaultFolderId, defaultTypeName]);
 
   const mutation = useMutation({
     mutationFn: async (): Promise<{ ingestReturnedExisting: boolean }> => {
       const client = vectrosApiClient(tenant, context);
       const folderPart = folderId === NO_FOLDER ? {} : { folderId };
       const externalIdPart = externalId.trim() === '' ? {} : { externalId: externalId.trim() };
-      // Typed create: bind the schema and send the form-authored metadata
+      // Typed create: bind the RESOLVED schema (never a raw picker id — see
+      // resolvedSchemaQuery above) and send the form-authored metadata
       // (validated against the schema server-side).
-      const typePart = schemaId === NO_TYPE ? {} : { schemaId };
+      const resolvedSchemaId = activeSchema?.id;
+      const typePart =
+        selectedTypeName === NO_TYPE || !resolvedSchemaId ? {} : { schemaId: resolvedSchemaId };
       const payloadPart =
-        schemaId !== NO_TYPE && Object.keys(payload).length > 0 ? { payload } : {};
+        selectedTypeName !== NO_TYPE && Object.keys(payload).length > 0 ? { payload } : {};
 
       if (mode === 'upload') {
         if (!file) throw new Error('no file selected');
@@ -237,8 +261,13 @@ export function AddDocumentDialog({
   });
 
   const fileTooLarge = file !== null && file.size > MAX_UPLOAD_BYTES;
+  // A selected type must have finished resolving to its governing schema
+  // before submit — otherwise a submit mid-resolution would silently create
+  // an UNTYPED document instead of the typed one the user asked for.
+  const typeReady = selectedTypeName === NO_TYPE || typeof activeSchema?.id === 'string';
   const canSubmit =
     !mutation.isPending &&
+    typeReady &&
     Object.keys(fieldErrors).length === 0 &&
     (mode === 'upload'
       ? file !== null && !fileTooLarge
@@ -358,18 +387,18 @@ export function AddDocumentDialog({
               <Select
                 labelId="add-doc-type-label"
                 label={intl.formatMessage({ id: 'addDocument.typeLabel' })}
-                value={schemaId}
+                value={selectedTypeName}
                 onChange={(e: SelectChangeEvent) => {
-                  setSchemaId(e.target.value);
+                  setSelectedTypeName(e.target.value);
                   setPayload({}); // metadata fields belong to the selected type
                 }}
               >
                 <MenuItem value={NO_TYPE}>
                   {intl.formatMessage({ id: 'addDocument.typeNone' })}
                 </MenuItem>
-                {docTypes.map((s) => (
-                  <MenuItem key={s.id} value={s.id ?? ''}>
-                    {s.typeName}
+                {docTypeOptions.map((s) => (
+                  <MenuItem key={s.typeName} value={s.typeName}>
+                    {s.displayName && s.displayName.length > 0 ? s.displayName : s.typeName}
                   </MenuItem>
                 ))}
               </Select>

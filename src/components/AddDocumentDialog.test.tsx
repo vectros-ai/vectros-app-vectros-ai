@@ -45,7 +45,7 @@ function renderDialog(
   opts: {
     folders?: ReadonlyArray<FolderResponse>;
     defaultFolderId?: string;
-    defaultSchemaId?: string;
+    defaultTypeName?: string;
   } = {},
 ): { onClose: ReturnType<typeof vi.fn> } {
   const onClose = vi.fn();
@@ -60,7 +60,7 @@ function renderDialog(
             open
             folders={opts.folders ?? []}
             defaultFolderId={opts.defaultFolderId}
-            defaultSchemaId={opts.defaultSchemaId}
+            defaultTypeName={opts.defaultTypeName}
             onClose={onClose}
           />
         </CurrentContextProvider>
@@ -493,6 +493,41 @@ describe('AddDocumentDialog — typed create (document-surface schemas)', () => 
     expect(screen.getByRole('button', { name: 'Upload' })).toBeEnabled();
   });
 
+  it('dedupes a base+variant pair sharing one typeName to a single option, and binds the recordType-resolved schema (not an arbitrary raw-list row)', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_1', uploadUrl: 'https://s3.example/put', created: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    const BASE = { id: 'sch_base', typeName: 'contract', allowedSurfaces: ['document'], fields: [] };
+    const VARIANT = {
+      id: 'sch_variant',
+      basedOn: 'sch_base',
+      typeName: 'contract',
+      allowedSurfaces: ['document'],
+      fields: [],
+    };
+    const listSchemas = vi.fn((req?: { recordType?: string }) =>
+      Promise.resolve({
+        data: req?.recordType === 'contract' ? [VARIANT] : [BASE, VARIANT],
+      }),
+    );
+    mockedClient.mockReturnValue({ documents: { uploadDocument }, schemas: { listSchemas } } as never);
+
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.click(await screen.findByLabelText('Type (optional)'));
+    // Exactly one "contract" option — no duplicate-key collision.
+    expect(await screen.findAllByRole('option', { name: 'contract' })).toHaveLength(1);
+    await user.click(screen.getByRole('option', { name: 'contract' }));
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    // Bound to the RESOLVED variant's id, never the base's.
+    await vi.waitFor(() =>
+      expect(uploadDocument).toHaveBeenCalledWith(expect.objectContaining({ schemaId: 'sch_variant' })),
+    );
+  });
+
   it('pre-selects the type handed down from the list’s active by-type view', async () => {
     const user = userEvent.setup();
     const uploadDocument = vi
@@ -501,7 +536,7 @@ describe('AddDocumentDialog — typed create (document-surface schemas)', () => 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
     stub({ uploadDocument }, [CONTRACT_TYPE]);
 
-    renderDialog({ defaultSchemaId: 'sch_contract' });
+    renderDialog({ defaultTypeName: 'contract' });
 
     // The picker arrives already set to the list's type (still changeable)…
     expect(

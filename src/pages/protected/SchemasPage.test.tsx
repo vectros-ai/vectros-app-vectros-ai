@@ -87,4 +87,30 @@ describe('SchemasPage', () => {
     renderPage();
     expect(await screen.findByText(/couldn.t load this context.s schemas/i)).toBeInTheDocument();
   });
+
+  // --- lineage (basedOn) ---------------------------------------------------
+
+  it('shows Base for a lineage root and links a variant to its base by display name', async () => {
+    stub(
+      vi.fn().mockResolvedValue(
+        pageOf([
+          { id: 'base_1', typeName: 'patient', displayName: 'Patient', active: true },
+          {
+            id: 'variant_1',
+            typeName: 'patient',
+            basedOn: 'base_1',
+            displayName: 'Patient (Cardiology)',
+            active: true,
+          },
+        ]),
+      ),
+    );
+
+    renderPage();
+
+    await screen.findByText('Patient (Cardiology)');
+    expect(screen.getByText('Base')).toBeInTheDocument();
+    const link = screen.getByRole('link', { name: 'Variant of Patient' });
+    expect(link).toHaveAttribute('href', '/schemas/base_1');
+  });
 });

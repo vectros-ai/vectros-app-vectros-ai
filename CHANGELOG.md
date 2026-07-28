@@ -3,6 +3,69 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.11.0 — 2026-07-27
+
+### Security
+
+- Upgrade `react-router` to `^8.3.0`, clearing five published advisories that
+  covered every 6.x/7.x release and 8.x up to 8.2.0. Three of the five are
+  specific to server-side rendering and React Server Components, which this app
+  does not use; the two that can reach a browser-only app are an open redirect
+  via backslashes in link targets and inefficient route matching.
+
+  Note that the upgrade does **not** by itself make a link target safe: an
+  attacker-controlled value passed to `<Link to>` or `navigate()` can still
+  resolve off-origin. Validate any redirect target you accept from a URL or
+  from user input before routing to it — this app builds every navigation
+  target from a literal path, so it has no such input today.
+
+### Changed
+
+- **Minimum React and Node versions are now higher**, following the router
+  upgrade above. Forks need **React 19.2.7+** (this app pins 19.2.8) and
+  **Node 22.22.0+**; `engines.node` was narrowed to `>=22.22.0` to match.
+
+### Added
+
+- **A schema's lineage is now shown.** A record type can have a shared base
+  schema plus one or more per-owner customizations of it. The schema browser
+  now shows, for each schema, whether it's the shared base or a customization
+  of one (with a link to the base); a schema's own detail page shows the same,
+  linking through to whichever schema it customizes.
+- Route-matching regression tests covering that a static path segment still
+  out-ranks a sibling dynamic one — `/records/new` opens the create editor
+  rather than a record whose id is the literal string "new" — and that a record
+  or document id survives being encoded into a link and read back out,
+  including ids containing `+`, `@`, `:`, `/`, `?`, `#` and `%`.
+
+### Fixed
+
+- **Record views now resolve the right schema when a type has more than one.**
+  The records list, the record detail view, and the "new record" type picker
+  previously matched a record type by name against the full schema list —
+  correct only while every type name mapped to exactly one schema. Now that a
+  type can have a shared base plus per-owner customizations sharing its name,
+  that match could silently pick an unrelated schema and show the wrong
+  fields. Each of these now resolves the caller's own schema for a type the
+  same way creating a record already did, and a type with more than one
+  schema no longer shows indistinguishable duplicate entries in its picker.
+- **The documents list could hide documents of a type with more than one
+  schema.** Switching to a type whose name has both a shared base schema and a
+  customization of it filtered documents by matching a single resolved schema
+  — so every document filed under the type's OTHER schema silently
+  disappeared from the typed view instead of just showing the wrong columns.
+  The list now scopes by the type name itself, so every document of the
+  selected type stays visible regardless of which specific schema governs it;
+  the "add document" type picker and its documented default no longer show
+  duplicate entries for the same type name either.
+- **The documents type filter could briefly show "All types"** right after
+  picking a specific type, and could stay stuck that way if the type's schema
+  failed to load — even though the list underneath was already correctly
+  filtered. The filter now always reflects the type you picked.
+- **Search's type filter could show a duplicate, unselectable entry** for a
+  type with more than one schema (a shared base plus your own customization
+  of it), the same issue already fixed on the records and documents pages.
+
 ## 0.10.0 — 2026-07-22
 
 ### Added

@@ -147,6 +147,62 @@ describe('RecordsPage', () => {
     expect(screen.queryByRole('option', { name: 'Smoke Doc Note' })).not.toBeInTheDocument();
   });
 
+  it('dedupes a base+variant pair sharing one typeName to a single picker option, and resolves columns via the recordType-filtered lookup (not the raw list)', async () => {
+    const user = userEvent.setup();
+    // The raw (unfiltered) list carries BOTH a lineage base and the caller's
+    // own `basedOn` variant for "patient" — same typeName, different fields.
+    const listSchemas = vi.fn((req?: { recordType?: string }) => {
+      if (req?.recordType === 'patient') {
+        // The API's ownership-shadowing resolution: the caller's own variant.
+        return Promise.resolve(
+          pageOf([
+            {
+              id: 'variant_1',
+              basedOn: 'base_1',
+              allowedSurfaces: ['record'],
+              typeName: 'patient',
+              fields: [{ fieldId: 'riskScore', fieldType: 'number' }],
+            },
+          ]),
+        );
+      }
+      return Promise.resolve(
+        pageOf([
+          { id: 'base_1', allowedSurfaces: ['record'], typeName: 'patient', fields: [] },
+          {
+            id: 'variant_1',
+            basedOn: 'base_1',
+            allowedSurfaces: ['record'],
+            typeName: 'patient',
+            fields: [{ fieldId: 'riskScore', fieldType: 'number' }],
+          },
+        ]),
+      );
+    });
+    stub({
+      listSchemas,
+      listRecords: vi
+        .fn()
+        .mockResolvedValue(
+          pageOf([{ id: 'rec_1', typeName: 'patient', status: 'ACTIVE', payload: { riskScore: 7 } }]),
+        ),
+    });
+    renderPage();
+
+    // Exactly one "patient" option in the picker — no duplicate-key collision.
+    await user.click(await screen.findByRole('combobox', { name: 'Record type' }));
+    expect(await screen.findAllByRole('option', { name: 'patient' })).toHaveLength(1);
+    await user.keyboard('{Escape}');
+
+    // Columns reflect the resolved variant's fields (riskScore), proving the
+    // active schema came from the recordType-filtered lookup, not whichever
+    // of the two raw-list rows happened to be found first.
+    await waitFor(() =>
+      expect(listSchemas).toHaveBeenCalledWith(expect.objectContaining({ recordType: 'patient' })),
+    );
+    expect(await screen.findByRole('columnheader', { name: /riskScore/i })).toBeInTheDocument();
+  });
+
   it('refetches the records list when the refresh button is clicked', async () => {
     const user = userEvent.setup();
     const listRecords = vi

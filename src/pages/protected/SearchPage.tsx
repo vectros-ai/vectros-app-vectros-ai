@@ -54,6 +54,7 @@ import { vectrosApiClient } from '../../api/vectrosApi';
 import type { FolderResponse, SchemaResponse, SearchResultItem } from '../../api/vectrosApi';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { drainPages } from '../../lib/drainPages';
+import { distinctTypes } from '../../lib/schemaSurfaces';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { folderMenuItems } from '../../components/folderMenuItems';
 import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
@@ -131,9 +132,14 @@ export function SearchPage(): React.JSX.Element {
     queryKey: dataQueryKeys.schemas(tenant, context),
     queryFn: () => listAllSchemas(tenant, context),
   });
-  const schemaTypes = (schemasQuery.data ?? [])
-    .map((s: SchemaResponse) => s.typeName)
-    .filter((t): t is string => typeof t === 'string' && t !== '');
+  // One filter option per distinct type name — never one per schema row (a
+  // type can have more than one schema: a lineage's shared base plus the
+  // caller's own `basedOn` variant), mirroring the type pickers elsewhere.
+  const typedSchemas = (schemasQuery.data ?? []).filter(
+    (s): s is SchemaResponse & { typeName: string } =>
+      typeof s.typeName === 'string' && s.typeName !== '',
+  );
+  const schemaTypes = distinctTypes(typedSchemas).map((s) => s.typeName);
 
   const folderId = folderFilter === ALL_FOLDERS ? undefined : folderFilter;
   // `typeName` scopes a search to a single schema type across whichever content

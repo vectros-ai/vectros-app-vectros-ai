@@ -43,6 +43,18 @@ function fieldCount(schema: SchemaResponse): number {
   return schema.fields?.length ?? 0;
 }
 
+/**
+ * A friendly label for the lineage base `schema.basedOn` points at — the
+ * base's displayName/typeName when it's in the currently-loaded list, else
+ * the raw id (the base may exist but not be visible under this list's own
+ * data-scope filter).
+ */
+function baseLabel(basedOn: string, byId: ReadonlyMap<string, SchemaResponse>): string {
+  const base = byId.get(basedOn);
+  if (!base) return basedOn;
+  return base.displayName && base.displayName.length > 0 ? base.displayName : (base.typeName ?? basedOn);
+}
+
 export function SchemasPage(): React.JSX.Element {
   const tenant = useActiveTenantId();
   const context = useActiveContextId();
@@ -54,6 +66,12 @@ export function SchemasPage(): React.JSX.Element {
   });
 
   const schemas: ReadonlyArray<SchemaResponse> = schemasQuery.data ?? [];
+  // Keyed for the lineage column below — a variant's `basedOn` names another
+  // schema's id, which may or may not be in this same page's data-scope view.
+  const schemaById = new Map<string, SchemaResponse>();
+  for (const s of schemas) {
+    if (s.id) schemaById.set(s.id, s);
+  }
 
   return (
     <Stack spacing={4}>
@@ -90,6 +108,9 @@ export function SchemasPage(): React.JSX.Element {
                   <FormattedMessage id="schemas.colVersion" />
                 </TableCell>
                 <TableCell>
+                  <FormattedMessage id="schemas.colLineage" />
+                </TableCell>
+                <TableCell>
                   <FormattedMessage id="schemas.colActive" />
                 </TableCell>
                 <TableCell>
@@ -118,6 +139,26 @@ export function SchemasPage(): React.JSX.Element {
                   <TableCell>{s.displayName && s.displayName.length > 0 ? s.displayName : '—'}</TableCell>
                   <TableCell align="right">{fieldCount(s)}</TableCell>
                   <TableCell align="right">{s.schemaVersion ?? '—'}</TableCell>
+                  <TableCell>
+                    {s.basedOn ? (
+                      <Link
+                        component={RouterLink}
+                        to={`/schemas/${encodeURIComponent(s.basedOn)}`}
+                        sx={{ fontSize: 'body2.fontSize' }}
+                      >
+                        <FormattedMessage
+                          id="schemas.lineageVariantOf"
+                          values={{ name: baseLabel(s.basedOn, schemaById) }}
+                        />
+                      </Link>
+                    ) : (
+                      <Chip
+                        size="small"
+                        variant="outlined"
+                        label={intl.formatMessage({ id: 'schemas.lineageBase' })}
+                      />
+                    )}
+                  </TableCell>
                   <TableCell>
                     <Chip
                       size="small"

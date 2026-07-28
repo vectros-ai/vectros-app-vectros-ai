@@ -24,6 +24,20 @@ export const dataQueryKeys = {
     schemaId: string,
   ): readonly ['data', string, string, 'schema', string] =>
     ['data', tenant, context, 'schema', schemaId] as const,
+  /**
+   * The caller's own schema for a bare type name, resolved by the API's
+   * `basedOn` ownership-shadowing walk — the caller's own variant if
+   * one exists, else the shared base. Distinct from `schemas` (the full,
+   * unresolved list, which can carry more than one schema per `typeName` once
+   * variants exist) — use this whenever "the" schema governing a type name is
+   * needed, never a `typeName` match against the full list.
+   */
+  schemaByType: (
+    tenant: string,
+    context: string,
+    typeName: string,
+  ): readonly ['data', string, string, 'schemaByType', string] =>
+    ['data', tenant, context, 'schemaByType', typeName] as const,
   /** Records of a given type in the active context. */
   records: (
     tenant: string,

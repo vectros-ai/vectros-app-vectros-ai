@@ -25,8 +25,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
-import type { SchemaResponse, Vectros } from '../../api/vectrosApi';
-import { listAllSchemas } from '../../lib/listAllSchemas';
+import type { Vectros } from '../../api/vectrosApi';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { indexStatusLabel, recordStatusLabel } from '../../lib/recordLabels';
 import { findDisplayFieldId, formatCellValue } from '../../lib/recordColumns';
@@ -55,11 +54,17 @@ export function RecordDetailPage(): React.JSX.Element {
   });
 
   // The record's schema drives the displayField title + reference cross-links.
-  // Cheap + cached (shared with RecordsPage); the view degrades gracefully to
-  // id/raw-JSON while it loads or if it's unavailable.
-  const schemasQuery = useQuery({
-    queryKey: dataQueryKeys.schemas(tenant, context),
-    queryFn: () => listAllSchemas(tenant, context),
+  // Loaded by the record's own stamped `schemaId` (its schema for its entire
+  // lifecycle) — NOT re-derived by matching `typeName` against
+  // the context's full schema list, which is ambiguous once a type can have a
+  // shared base plus per-owner `basedOn` variants sharing that same typeName.
+  // The view degrades gracefully to id/raw-JSON while it loads or if it's
+  // unavailable.
+  const recordSchemaId = recordQuery.data?.schemaId;
+  const schemaQuery = useQuery({
+    queryKey: dataQueryKeys.schema(tenant, context, recordSchemaId ?? ''),
+    queryFn: () => vectrosApiClient(tenant, context).schemas.getSchema({ id: recordSchemaId ?? '' }),
+    enabled: typeof recordSchemaId === 'string' && recordSchemaId !== '',
   });
 
   // Audit-trail version history — the "version history" later-phase noted in
@@ -156,11 +161,9 @@ export function RecordDetailPage(): React.JSX.Element {
   const payload = (record.payload ?? {}) as Record<string, unknown>;
   const payloadJson = JSON.stringify(record.payload ?? {}, null, 2);
 
-  // Resolve the record's schema (cached; may still be loading) for the
-  // field-model–driven enhancements below.
-  const activeSchema: SchemaResponse | undefined = (schemasQuery.data ?? []).find(
-    (s) => s.typeName === record.typeName,
-  );
+  // The record's own schema (may still be loading) drives the field-model
+  // enhancements below.
+  const activeSchema = schemaQuery.data;
   const schemaFields = activeSchema?.fields ?? [];
   const renderHints = activeSchema?.renderHints;
 
