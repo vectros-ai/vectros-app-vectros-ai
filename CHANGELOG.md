@@ -3,6 +3,73 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.12.0 — 2026-08-05
+
+### Changed
+
+- **Repinned to `@vectros-ai/sdk` 0.38.0.**
+
+### Added
+
+- **Support for composite lookups** — a schema lookup declared over more than
+  one field at once (e.g. `status` and `area` together). A schema's detail
+  page shows a composite's declared identity — its member field names joined
+  by comma (e.g. `status,area`), the same spelling the API's `field` query
+  parameter uses. Records can be looked up by one: the lookup panel offers a
+  composite as one value input per declared field, matching on all of them at
+  once. A value is required for every declared field for now — matching on a
+  leading subset of them (which the API supports, returning results grouped
+  by the fields you left out) isn't exposed yet. Composite lookups are
+  record-only, so this doesn't apply to documents.
+- **An exact records lookup can now be narrowed to a window of when it
+  happened.** Optional "Sort from" / "Sort to" bounds, offered alongside an
+  exact (or composite) match, narrow results to a range of the lookup's own
+  sort order — by default when the record was created, unless the lookup
+  sorts by something else. Either bound may be given alone. Only offered
+  where the bound's units are unambiguous (the default creation-time sort, or
+  a lookup explicitly sorted by last-updated); a lookup sorted by a custom
+  field doesn't show the window, since there'd be no way to say what a
+  typed-in value means for it.
+
+## 0.11.2 — 2026-08-04
+
+### Fixed
+
+- **Lists that span more than one page are complete again.** Every list the app drains itself — the
+  context switcher's profile listing, the schema enumeration, the folder pickers, and the document
+  list — paged by taking the last row's `id` as the next `startFrom`. That is not what `startFrom` means: the API returns an
+  opaque `nextCursor` in each page, and `startFrom` is that cursor echoed back. Feeding it a row id
+  resumed from the wrong position on any listing whose cursor is more than a plain row key — an
+  ownership-scope filter, for one — and is refused outright by newer API versions, which authenticate
+  the cursor and answer a fabricated one with a 400. The context switcher is the widest blast radius:
+  a principal holding more profiles than fit on one page could fail to load the app at all. The
+  paginator now hands the envelope's cursor straight back.
+
+- **A page that comes back short or empty no longer ends a drain.** Server-side filtering is applied
+  to each page after that page's cursor is captured, so a filtered listing routinely yields an empty
+  page with rows still behind it — normal for any credential carrying a data scope. The drain
+  terminated on `data.length < limit` and silently dropped everything past such a page. Only a null
+  cursor ends it now, and a listing that is still not exhausted at the page ceiling raises an error
+  rather than quietly returning a partial result. A listing of exactly the ceiling's worth of rows
+  still drains completely: a full final page carries a live cursor, so confirming exhaustion costs
+  one request beyond the last page of data, and that request is not charged against the ceiling.
+
+- **A folder list that fails to load now says so, on Ask, Search, and document detail.** All three
+  fell back to an empty list, so a failure was indistinguishable from a context with no folders: the
+  scope picker simply did not appear. On Ask that is the worst of the three — you could ask a question
+  believing it was scoped to a folder when the scoping control had never loaded. Each surface now
+  shows an error explaining what is missing and what the results or answer actually cover.
+
+## 0.11.1 — 2026-08-03
+
+### Fixed
+
+- **The ownership-scope filter now rejects a value the API would reject.** The filter box checked only
+  that a value was non-empty and free of whitespace, so entries containing a colon or other
+  punctuation were sent and came back as an error from the server. It now applies the same grammar the
+  API does — 1-128 characters, a letter or digit first, then letters, digits, `_` and `-` — and flags
+  the value inline instead.
+
 ## 0.11.0 — 2026-07-27
 
 ### Security

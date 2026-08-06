@@ -91,6 +91,24 @@ describe('SchemaDetailPage', () => {
     expect(screen.queryByText('versioning')).not.toBeInTheDocument();
   });
 
+  it('renders a composite lookup (fieldNames, no fieldName) by its joined identity', async () => {
+    // A real composite: fieldNames is set, fieldName is ABSENT — a fixture that
+    // also set fieldName would pass even with the fallback missing.
+    stubGetSchema(
+      vi.fn().mockResolvedValue({
+        id: 's1',
+        typeName: 'ticket',
+        schemaVersion: 1,
+        lookupFields: [{ fieldNames: ['status', 'area'], unique: false }],
+      }),
+    );
+
+    renderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'ticket' })).toBeInTheDocument();
+    expect(screen.getByText('status,area')).toBeInTheDocument();
+  });
+
   it('shows an error state when the schema fails to load', async () => {
     stubGetSchema(vi.fn().mockRejectedValue(new Error('404')));
     renderDetail();

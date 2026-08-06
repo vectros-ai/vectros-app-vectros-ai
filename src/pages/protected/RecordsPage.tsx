@@ -66,7 +66,7 @@ import type { SortDirection } from '../../lib/recordColumns';
 import { fieldLabel } from '../../lib/recordForm';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { IndexStatusChip } from '../../components/IndexStatusChip';
-import { LookupPanel } from '../../components/LookupPanel';
+import { appliedLookupModeArgs, LookupPanel } from '../../components/LookupPanel';
 import type { AppliedLookup, LookupFieldDef } from '../../components/LookupPanel';
 import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
 import { RefreshButton } from '../../components/RefreshButton';
@@ -154,11 +154,16 @@ export function RecordsPage(): React.JSX.Element {
   );
   const filterFieldIds = filterableFieldIds(schemaFields);
 
-  // Lookup fields declared on the active schema; a field's `rangeEnabled` flag
-  // decides whether the panel offers range/prefix modes (vs exact-only).
-  const lookupDefs: ReadonlyArray<LookupFieldDef> = (activeSchema?.lookupFields ?? [])
-    .filter((l): l is typeof l & { fieldName: string } => typeof l.fieldName === 'string')
-    .map((l) => ({ fieldName: l.fieldName, rangeEnabled: l.rangeEnabled === true }));
+  // Lookup fields declared on the active schema — plain fields (a `rangeEnabled`
+  // flag decides whether the panel offers range/prefix modes) and composites
+  // (declared over more than one field). Passed through unfiltered: LookupPanel
+  // itself decides what's selectable and how, in one place.
+  const lookupDefs: ReadonlyArray<LookupFieldDef> = (activeSchema?.lookupFields ?? []).map((l) => ({
+    fieldName: l.fieldName,
+    fieldNames: l.fieldNames,
+    rangeEnabled: l.rangeEnabled === true,
+    sortBy: l.sortBy,
+  }));
 
   const recordsQuery = useQuery({
     // The ownership filter applies to the browse (non-lookup) path only, so it's
@@ -171,19 +176,14 @@ export function RecordsPage(): React.JSX.Element {
       const api = vectrosApiClient(tenant, context).records;
       // `{ data, nextCursor }` page envelope → first-page items.
       if (appliedLookup) {
-        // POST-body lookup: works for exact/range/prefix uniformly and keeps a
-        // sensitive field's value out of the URL query string.
-        const modeArgs =
-          appliedLookup.mode === 'exact'
-            ? { value: appliedLookup.value }
-            : appliedLookup.mode === 'range'
-              ? { from: appliedLookup.from, to: appliedLookup.to }
-              : { prefix: appliedLookup.prefix };
+        // POST-body lookup: works for exact/multi(composite)/range/prefix
+        // uniformly and keeps a sensitive field's value out of the URL query
+        // string.
         return (
           await api.lookupRecordsByBody({
             type: effectiveType as string,
             field: appliedLookup.field,
-            ...modeArgs,
+            ...appliedLookupModeArgs(appliedLookup),
             order: appliedLookup.order,
             limit: RECORDS_PAGE_SIZE,
           })
@@ -354,8 +354,12 @@ export function RecordsPage(): React.JSX.Element {
 
           {/* Server-side lookup — only when the active schema declares lookup
               fields. Exact match always; range (from/to) + prefix on
-              range-enabled fields; `order` sets the server's sort direction.
-              Keyed on the type so its inputs reset when the type changes. */}
+              range-enabled fields; a composite (declared over more than one
+              field) matches on all of them at once; `order` sets the
+              server's sort direction; an exact/composite match can also be
+              narrowed by the sort key's own range (`supportsSortWindow` —
+              records' lookup accepts it, documents' doesn't). Keyed on the
+              type so its inputs reset when the type changes. */}
           <LookupPanel
             key={effectiveType ?? ''}
             defs={lookupDefs}
@@ -363,6 +367,7 @@ export function RecordsPage(): React.JSX.Element {
             onApply={setAppliedLookup}
             messagePrefix="records"
             idPrefix="records-lookup"
+            supportsSortWindow
           />
 
           {recordsQuery.isPending ? (

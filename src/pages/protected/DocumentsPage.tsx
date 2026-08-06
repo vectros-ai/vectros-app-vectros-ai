@@ -117,6 +117,31 @@ function payloadOf(d: DocumentResponse): Record<string, unknown> | undefined {
   return d.payload as Record<string, unknown> | undefined;
 }
 
+/**
+ * `AppliedLookup`'s `{ field, ...bound }` args for `lookupDocumentsByBody`.
+ * Deliberately its OWN mapping rather than `LookupPanel`'s shared
+ * `appliedLookupModeArgs` — `DocumentLookupRequest` has no `values` field at
+ * all (composite lookups are record-only; see `lookupDefs` above), so the
+ * shared helper's `multi` branch doesn't type-check against this endpoint.
+ * `multi` can't actually be selected here (lookupDefs never offers a
+ * composite), so this throws rather than silently drop it — a defensive
+ * backstop, not an expected path.
+ */
+function documentLookupModeArgs(
+  applied: AppliedLookup,
+): { value: string } | { from: string; to: string } | { prefix: string } {
+  switch (applied.mode) {
+    case 'exact':
+      return { value: applied.value };
+    case 'range':
+      return { from: applied.from, to: applied.to };
+    case 'prefix':
+      return { prefix: applied.prefix };
+    case 'multi':
+      throw new Error('composite lookups are not supported for documents');
+  }
+}
+
 export function DocumentsPage(): React.JSX.Element {
   const tenant = useActiveTenantId();
   const context = useActiveContextId();
@@ -151,15 +176,10 @@ export function DocumentsPage(): React.JSX.Element {
   const foldersQuery = useQuery({
     queryKey: dataQueryKeys.folders(tenant, context),
     queryFn: () =>
-      drainPages<FolderResponse>(
-        async (startFrom) =>
-          (
-            await vectrosApiClient(tenant, context).folders.listFolders(
-              startFrom === undefined ? { limit: PAGE_SIZE } : { startFrom, limit: PAGE_SIZE },
-            )
-          ).data ?? [], // `{ data, nextCursor }` page envelope → items array
-        (f) => f.id,
-        PAGE_SIZE,
+      drainPages<FolderResponse>((startFrom) =>
+        vectrosApiClient(tenant, context).folders.listFolders(
+          startFrom === undefined ? { limit: PAGE_SIZE } : { startFrom, limit: PAGE_SIZE },
+        ),
       ),
   });
 
@@ -177,17 +197,12 @@ export function DocumentsPage(): React.JSX.Element {
   const documentsQuery = useQuery({
     queryKey: [...dataQueryKeys.documents(tenant, context, scopedFolderId), scopeParam ?? 'all'],
     queryFn: () =>
-      drainPages<DocumentResponse>(
-        async (startFrom) =>
-          (
-            await vectrosApiClient(tenant, context).documents.listDocuments({
-              ...(scopedFolderId === undefined ? {} : { folderId: scopedFolderId }),
-              ...(scopeParam ? { scope: scopeParam } : {}),
-              ...(startFrom === undefined ? { limit: PAGE_SIZE } : { startFrom, limit: PAGE_SIZE }),
-            })
-          ).data ?? [], // `{ data, nextCursor }` page envelope → items array
-        (d) => d.id,
-        PAGE_SIZE,
+      drainPages<DocumentResponse>((startFrom) =>
+        vectrosApiClient(tenant, context).documents.listDocuments({
+          ...(scopedFolderId === undefined ? {} : { folderId: scopedFolderId }),
+          ...(scopeParam ? { scope: scopeParam } : {}),
+          ...(startFrom === undefined ? { limit: PAGE_SIZE } : { startFrom, limit: PAGE_SIZE }),
+        }),
       ),
   });
 
@@ -252,6 +267,16 @@ export function DocumentsPage(): React.JSX.Element {
   // Lookup fields for the typed view: `externalId` always works (the document
   // identity key needs no schema declaration, exact-match only), plus the
   // schema's own lookup fields (range/prefix where `rangeEnabled`).
+  //
+  // Still filtered to `fieldName`-only entries here — unlike RecordsPage,
+  // which passes composites through for LookupPanel to handle. A composite
+  // is structurally impossible on a document-surface schema: the API refuses
+  // to declare a composite lookup on any schema whose allowedSurfaces isn't
+  // EXACTLY `[record]`, and this view only ever resolves a schema whose
+  // allowedSurfaces includes `document`. So this filter isn't standing in
+  // for LookupPanel's own exclusion (composites never reach it either way) —
+  // it exists only to keep `l.fieldName` narrowed to `string` for the map
+  // below, same as it always has.
   const lookupDefs: ReadonlyArray<LookupFieldDef> = activeSchema
     ? [
         { fieldName: 'externalId', rangeEnabled: false },
@@ -278,12 +303,6 @@ export function DocumentsPage(): React.JSX.Element {
     ),
     queryFn: async () => {
       if (!appliedLookup || !activeSchema) return [];
-      const modeArgs =
-        appliedLookup.mode === 'exact'
-          ? { value: appliedLookup.value }
-          : appliedLookup.mode === 'range'
-            ? { from: appliedLookup.from, to: appliedLookup.to }
-            : { prefix: appliedLookup.prefix };
       // POST-body lookup: works for exact/range/prefix uniformly and keeps a
       // sensitive field's value out of the URL query string.
       return (
@@ -291,7 +310,7 @@ export function DocumentsPage(): React.JSX.Element {
           await vectrosApiClient(tenant, context).documents.lookupDocumentsByBody({
             type: activeSchema.typeName ?? effectiveType ?? '',
             field: appliedLookup.field,
-            ...modeArgs,
+            ...documentLookupModeArgs(appliedLookup),
             order: appliedLookup.order,
             limit: PAGE_SIZE,
           })

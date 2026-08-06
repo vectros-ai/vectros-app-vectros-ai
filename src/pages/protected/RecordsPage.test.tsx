@@ -482,6 +482,71 @@ describe('RecordsPage', () => {
     expect(call.prefix).toBeUndefined();
   });
 
+  const SCHEMA_WITH_COMPOSITE_LOOKUP = {
+    id: 's2',
+    allowedSurfaces: ['record'], typeName: 'ticket',
+    displayName: 'Ticket',
+    fields: [{ fieldId: 'status', fieldType: 'string' }, { fieldId: 'area', fieldType: 'string' }],
+    // A real composite: fieldNames set, fieldName absent — matches what the
+    // API actually sends (see lookupFieldLabel.test.ts's fixtures).
+    lookupFields: [{ fieldNames: ['status', 'area'] }],
+  };
+
+  it('runs a composite lookup — field + values, one per declared leg, never a single value', async () => {
+    const user = userEvent.setup();
+    const lookupSpy = vi.fn().mockResolvedValue(
+      pageOf([{ id: 'rec_c', typeName: 'ticket', status: 'ACTIVE', payload: { status: 'open', area: 'billing' } }]),
+    );
+    stub({
+      listSchemas: vi.fn().mockResolvedValue(pageOf([SCHEMA_WITH_COMPOSITE_LOOKUP])),
+      listRecords: vi.fn().mockResolvedValue(pageOf([])),
+      lookupRecordsByBody: lookupSpy,
+    });
+    renderPage();
+
+    await screen.findByRole('combobox', { name: 'Look up by' });
+    await user.click(screen.getByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: 'status,area' }));
+    await user.type(screen.getByRole('textbox', { name: 'status' }), 'open');
+    await user.type(screen.getByRole('textbox', { name: 'area' }), 'billing');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+
+    await screen.findByRole('link', { name: 'rec_c' });
+    expect(lookupSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'ticket', field: 'status,area', values: ['open', 'billing'], order: 'asc' }),
+    );
+    const call = lookupSpy.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call.value).toBeUndefined();
+  });
+
+  it('narrows an exact lookup by the sort-key window (sortFrom/sortTo)', async () => {
+    const user = userEvent.setup();
+    const lookupSpy = vi.fn().mockResolvedValue(
+      pageOf([{ id: 'rec_w', typeName: 'event', status: 'ACTIVE', payload: { code: 'A' } }]),
+    );
+    stub({
+      listSchemas: vi.fn().mockResolvedValue(pageOf([SCHEMA_WITH_LOOKUPS])),
+      listRecords: vi.fn().mockResolvedValue(pageOf([])),
+      lookupRecordsByBody: lookupSpy,
+    });
+    renderPage();
+
+    await screen.findByRole('combobox', { name: 'Look up by' });
+    await user.click(screen.getByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: 'owner' }));
+    await user.type(screen.getByRole('textbox', { name: 'Value' }), 'acme');
+    await user.type(screen.getByRole('textbox', { name: 'Sort from' }), '1700000000000');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+
+    await screen.findByRole('link', { name: 'rec_w' });
+    expect(lookupSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'event', field: 'owner', value: 'acme', sortFrom: '1700000000000' }),
+    );
+    // sortTo was left blank — must not ride along as an empty string.
+    const call = lookupSpy.mock.calls[0]![0] as Record<string, unknown>;
+    expect(call.sortTo).toBeUndefined();
+  });
+
   it('falls back to the id headline when the displayField value is blank', async () => {
     stub({
       listSchemas: vi.fn().mockResolvedValue(pageOf([SCHEMA_WITH_DISPLAY])),

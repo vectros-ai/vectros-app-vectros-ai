@@ -1,9 +1,8 @@
 // ---------------------------------------------------------------------------
 // listAllSchemas — drain every schema in a (tenant, context) into one array.
 //
-// As of SDK 0.23 `schemas.listSchemas` is cursor-paginated (the
-// `{ data, nextCursor }` page envelope, default 20/page) where it previously returned
-// the full set as a bare array. Every schema consumer — the record type pickers,
+// `schemas.listSchemas` is cursor-paginated (the `{ data, nextCursor }` page
+// envelope, default 20/page). Every schema consumer — the record type pickers,
 // the schema-driven form, the table column derivations, the schema list — needs
 // the COMPLETE set; a partial first page would silently drop record types. So we
 // drain to exhaustion here, in one shared place.
@@ -27,16 +26,11 @@ const SCHEMA_PAGE_SIZE = 100;
  * Omit `contextId` for the tenant-default context.
  */
 export function listAllSchemas(tenantId: TenantId, contextId?: string): Promise<SchemaResponse[]> {
-  return drainPages<SchemaResponse>(
-    async (startFrom) =>
-      (
-        await vectrosApiClient(tenantId, contextId).schemas.listSchemas(
-          startFrom === undefined
-            ? { limit: SCHEMA_PAGE_SIZE }
-            : { startFrom, limit: SCHEMA_PAGE_SIZE },
-        )
-      ).data ?? [],
-    (s) => s.id,
-    SCHEMA_PAGE_SIZE,
+  return drainPages<SchemaResponse>((startFrom) =>
+    vectrosApiClient(tenantId, contextId).schemas.listSchemas(
+      startFrom === undefined
+        ? { limit: SCHEMA_PAGE_SIZE }
+        : { startFrom, limit: SCHEMA_PAGE_SIZE },
+    ),
   );
 }

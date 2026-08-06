@@ -35,6 +35,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
+import { lookupFieldLabel } from '../../lib/lookupFieldLabel';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 
 /** A small ✓/— cell for a boolean field attribute. */
@@ -292,19 +293,31 @@ export function SchemaDetailPage(): React.JSX.Element {
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {lookupFields.map((l) => (
-                    <TableRow key={l.fieldName} hover>
-                      <TableCell sx={{ fontFamily: 'monospace' }}>{l.fieldName}</TableCell>
-                      <TableCell align="center">
-                        <BoolCell on={l.unique} />
-                      </TableCell>
-                      {/* Range-enabled lookups also support ordered range + prefix
-                          queries (not just exact match). */}
-                      <TableCell align="center">
-                        <BoolCell on={l.rangeEnabled} />
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                  {lookupFields.map((l) => {
+                    // A composite lookup (0.38.0) has no `fieldName` — only an
+                    // ordered `fieldNames[]` of its legs. Render its declared
+                    // identity (`status,area`, the documented `field=` wire
+                    // spelling) rather than `undefined`. `lookupFieldLabel`
+                    // falls back to `''` only for a shape the API doesn't
+                    // produce (neither field set) — skip rendering it rather
+                    // than emit a blank row that would collide on `key=''`
+                    // with a sibling in the same, already-impossible case.
+                    const label = lookupFieldLabel(l);
+                    if (label === '') return null;
+                    return (
+                      <TableRow key={label} hover>
+                        <TableCell sx={{ fontFamily: 'monospace' }}>{label}</TableCell>
+                        <TableCell align="center">
+                          <BoolCell on={l.unique} />
+                        </TableCell>
+                        {/* Range-enabled lookups also support ordered range + prefix
+                            queries (not just exact match). */}
+                        <TableCell align="center">
+                          <BoolCell on={l.rangeEnabled} />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </TableContainer>

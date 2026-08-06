@@ -27,7 +27,7 @@ import { CurrentContextProvider } from './CurrentContextProvider';
 import { useCurrentContext } from './useCurrentContext';
 import type { AppContextOption } from './useCurrentContext';
 import { TestProviders } from '../test/TestProviders';
-import { pageOf } from '../test/pageOf';
+import { pageOf, pageOfWithCursor, sealedCursor } from '../test/pageOf';
 
 // Mock the data-plane SDK client — the provider's only outbound dependency.
 vi.mock('../api/vectrosApi', () => ({ vectrosApiClient: vi.fn() }));
@@ -219,6 +219,49 @@ describe('CurrentContextProvider enumeration', () => {
     // Principal is usr_<partnerUserId> (NOT the Cognito sub); pagination adds a limit.
     expect(listProfilesForPrincipal).toHaveBeenCalledWith(
       expect.objectContaining({ principalId: 'usr_pu_42' }),
+    );
+  });
+
+  it('SUB_USER: drains the profile listing past page 1 on the opaque cursor', async () => {
+    // The context switcher is the highest-blast-radius drain in the app: a
+    // principal with more profiles than one page gets a degraded WHOLE APP if
+    // this resumes wrongly. The fixture enforces the real contract — it answers
+    // a 400 to any `startFrom` it did not mint — so a row id fails here, and the
+    // middle page is EMPTY with a live cursor (a scope-filtered page) to prove
+    // the drain does not stop short of the profile behind it.
+    // Page 3 repeats project-x deliberately. A principal can hold more than one
+    // active profile in the same context, and page boundaries are not aligned to
+    // anything, so a duplicate ACROSS pages is the normal case rather than an
+    // edge one — it is only invisible in a fixture engineered to hold distinct
+    // ids. It covers the drain and the `seen` dedup in one cell.
+    const pages = [
+      pageOfWithCursor([{ contextId: 'project-x', status: 'active' }], sealedCursor(1)),
+      pageOfWithCursor([], sealedCursor(2)),
+      pageOf([
+        { contextId: 'project-y', status: 'active' },
+        { contextId: 'project-x', status: 'active' },
+      ]),
+    ];
+    const listProfilesForPrincipal = vi
+      .fn()
+      .mockImplementation(({ startFrom }: { startFrom?: string }) => {
+        const index =
+          startFrom === undefined ? 0 : pages.findIndex((_, i) => sealedCursor(i) === startFrom);
+        if (index < 0) {
+          return Promise.reject(new Error(`400 invalid_cursor: ${JSON.stringify(startFrom)}`));
+        }
+        return Promise.resolve(pages[index]);
+      });
+    stubClient({ listProfilesForPrincipal });
+
+    renderWithRole('SUB_USER', 'pu_42');
+
+    expect(await screen.findByText('project-x,project-y')).toBeInTheDocument();
+    expect(screen.getByTestId('error')).toHaveTextContent('false');
+    expect(listProfilesForPrincipal).toHaveBeenCalledTimes(3);
+    expect(listProfilesForPrincipal).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ startFrom: sealedCursor(1) }),
     );
   });
 

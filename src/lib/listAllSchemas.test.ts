@@ -1,11 +1,11 @@
 // ---------------------------------------------------------------------------
 // listAllSchemas tests — the drained schema enumeration used by every schema
 // consumer. The interesting behaviour is the MULTI-PAGE drain: unwrapping the
-// `{ data, nextCursor }` page envelope and advancing the `startFrom` cursor
-// from the last schema's id. A regression in either (unwrapping the wrong
-// field, or the wrong cursor key) would silently truncate the record-type
-// pickers, so both are covered here rather than only at the single-page level
-// the page tests exercise.
+// `{ data, nextCursor }` page envelope and echoing that opaque cursor back as
+// `startFrom`. A regression in either (unwrapping the wrong field, or inventing
+// a cursor from row data) truncates the record-type pickers or earns a 400, so
+// both are covered here rather than only at the single-page level the page
+// tests exercise.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
@@ -14,7 +14,7 @@ vi.mock('../api/vectrosApi', () => ({ vectrosApiClient: vi.fn() }));
 import { vectrosApiClient } from '../api/vectrosApi';
 
 import { listAllSchemas } from './listAllSchemas';
-import { pageOf } from '../test/pageOf';
+import { pageOf, pageOfWithCursor, sealedCursor } from '../test/pageOf';
 
 const mockedClient = vi.mocked(vectrosApiClient);
 
@@ -26,14 +26,14 @@ function stubListSchemas(listSchemas: ReturnType<typeof vi.fn>): void {
 describe('listAllSchemas', () => {
   beforeEach(() => mockedClient.mockReset());
 
-  it('drains across pages, unwrapping the envelope and seeding startFrom from the last id', async () => {
-    // A full first page (= SCHEMA_PAGE_SIZE, 100) forces a second fetch; the
-    // short second page (< 100) terminates the drain.
+  it('drains across pages, echoing the envelope cursor back as startFrom', async () => {
+    // A live `nextCursor` forces a second fetch; the null cursor on page 2
+    // terminates the drain. Page SIZE says nothing either way.
     const page1 = Array.from({ length: 100 }, (_, i) => ({ id: `s${i}`, typeName: `t${i}` }));
     const page2 = [{ id: 's100', typeName: 't100' }];
     const listSchemas = vi
       .fn()
-      .mockResolvedValueOnce(pageOf(page1))
+      .mockResolvedValueOnce(pageOfWithCursor(page1, sealedCursor(1)))
       .mockResolvedValueOnce(pageOf(page2));
     stubListSchemas(listSchemas);
 
@@ -42,14 +42,31 @@ describe('listAllSchemas', () => {
     // Both pages concatenated, in order.
     expect(result).toHaveLength(101);
     expect(result[100]?.id).toBe('s100');
-    // First page omits startFrom; the second is seeded from page 1's last id.
+    // First page omits startFrom; the second echoes page 1's opaque cursor —
+    // NOT a row id, which the API would refuse.
     expect(listSchemas).toHaveBeenNthCalledWith(1, { limit: 100 });
-    expect(listSchemas).toHaveBeenNthCalledWith(2, { startFrom: 's99', limit: 100 });
+    expect(listSchemas).toHaveBeenNthCalledWith(2, { startFrom: sealedCursor(1), limit: 100 });
     // The client is resolved for the requested (tenant, context).
     expect(mockedClient).toHaveBeenCalledWith('tnt_1', 'default');
   });
 
-  it('stops after a single short page (no second fetch) and defaults the context', async () => {
+  it('keeps draining through an empty page that carries a live cursor', async () => {
+    // A scope-filtered page can be empty with schemas still behind it; stopping
+    // here would silently drop record types from every picker downstream.
+    const listSchemas = vi
+      .fn()
+      .mockResolvedValueOnce(pageOfWithCursor([{ id: 's1', typeName: 't1' }], sealedCursor(1)))
+      .mockResolvedValueOnce(pageOfWithCursor([], sealedCursor(2)))
+      .mockResolvedValueOnce(pageOf([{ id: 's2', typeName: 't2' }]));
+    stubListSchemas(listSchemas);
+
+    const result = await listAllSchemas('tnt_1', 'default');
+
+    expect(result.map((s) => s.id)).toEqual(['s1', 's2']);
+    expect(listSchemas).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops after a single terminal page (no second fetch) and defaults the context', async () => {
     const listSchemas = vi.fn().mockResolvedValue(pageOf([{ id: 's1', typeName: 't1' }]));
     stubListSchemas(listSchemas);
 

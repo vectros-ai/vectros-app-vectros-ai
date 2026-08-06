@@ -61,7 +61,7 @@ const DEFAULT_CONTEXT_ID = 'default';
 const PRINCIPAL_PREFIX_USER = 'usr_';
 /** Page size for enumeration — the SDK's max (its default is only 20). */
 const ENUMERATION_PAGE_SIZE = 100;
-/** Safety ceiling on pages (100 × 50 = 5000 items) — guards a non-advancing cursor. */
+/** Safety ceiling on pages (100 × 50 = 5000 items) — guards a cursor that never goes null. */
 const ENUMERATION_MAX_PAGES = 50;
 
 /** Build a switcher option, falling back to the id when no display name exists. */
@@ -145,16 +145,12 @@ async function enumerateForSubUser(
 ): Promise<AppContextOption[]> {
   const principalId = `${PRINCIPAL_PREFIX_USER}${partnerUserId}`;
   const profiles = await drainPages(
-    async (startFrom) =>
-      (
-        await vectrosApiClient(tenant.tenantId).auth.listProfilesForPrincipal(
-          startFrom === undefined
-            ? { principalId, limit: ENUMERATION_PAGE_SIZE }
-            : { principalId, startFrom, limit: ENUMERATION_PAGE_SIZE },
-        )
-      ).data ?? [], // `{ data, nextCursor }` page envelope → items array
-    (p) => p.id,
-    ENUMERATION_PAGE_SIZE,
+    (startFrom) =>
+      vectrosApiClient(tenant.tenantId).auth.listProfilesForPrincipal(
+        startFrom === undefined
+          ? { principalId, limit: ENUMERATION_PAGE_SIZE }
+          : { principalId, startFrom, limit: ENUMERATION_PAGE_SIZE },
+      ),
     ENUMERATION_MAX_PAGES,
   );
   const seen = new Set<string>();

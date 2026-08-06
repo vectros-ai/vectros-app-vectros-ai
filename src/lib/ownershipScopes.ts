@@ -100,7 +100,11 @@ export function validateScopeEntries(
     const ns = entry.namespace.trim();
     const nsError = validateScopeNamespace(ns);
     if (nsError) return { code: 'namespace', index: i, error: nsError };
-    if (entry.value.trim() === '') return { code: 'value', index: i };
+    // Same grammar the filter box applies, and the same one the API enforces — an entry the
+    // server would refuse is flagged in the editor rather than on save. Tested against the trimmed
+    // value because `buildScopes` formats from the trimmed entry, so this IS what gets sent (unlike
+    // the filter path, where the raw string is sent and trimming here would under-report).
+    if (!isValidScopeValue(entry.value.trim())) return { code: 'value', index: i };
     if (seen.has(ns)) return { code: 'duplicate', index: i, namespace: ns };
     seen.add(ns);
     complete += 1;
@@ -113,14 +117,35 @@ export function validateScopeEntries(
 }
 
 /**
+ * The grammar a scope VALUE must satisfy: 1-128 characters, a letter or digit
+ * first, then letters, digits, `_` or `-`. This mirrors the API's own rule — a
+ * scope value becomes part of a storage key there, so the server rejects
+ * anything outside this set. Keeping the check identical is what lets the editor
+ * flag a bad value inline rather than sending a request that is certain to fail.
+ */
+const SCOPE_VALUE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+/** True when `value` satisfies the scope-value grammar the API enforces. */
+export function isValidScopeValue(value: string): boolean {
+  return SCOPE_VALUE_PATTERN.test(value);
+}
+
+/**
  * Validate a single ownership filter string (`namespace:value`). Both halves are
- * checked: the namespace against the grammar, and the value for non-emptiness
- * and no embedded whitespace (so a half-typed `org:abc def` never fires a doomed
- * request).
+ * checked: the namespace against its grammar, and the value against
+ * {@link SCOPE_VALUE_PATTERN}, so a half-typed `org:abc def` — or any value the
+ * API would refuse — never fires a doomed request.
+ *
+ * The value is tested EXACTLY as it will be sent, without trimming. Trimming first
+ * made this looser than the whitespace check it replaced: `org: 6ba7…` (a space
+ * after the colon, an ordinary typing habit) validated clean and was then sent
+ * untrimmed, producing the server rejection this function exists to pre-empt. If
+ * surrounding whitespace should be tolerated, normalise it where the entry is
+ * PARSED so the validated string and the sent string stay the same one.
  */
 export function validateScopeFilter(raw: string): ScopeNamespaceError | null {
   const entry = parseScopeEntry(raw);
   if (!entry) return { code: 'grammar' };
-  if (entry.value.trim() === '' || /\s/.test(entry.value)) return { code: 'grammar' };
+  if (!isValidScopeValue(entry.value)) return { code: 'grammar' };
   return validateScopeNamespace(entry.namespace);
 }

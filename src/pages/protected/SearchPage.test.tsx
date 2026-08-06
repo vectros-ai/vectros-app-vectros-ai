@@ -66,6 +66,23 @@ async function runSearch(term: string): Promise<void> {
 describe('SearchPage', () => {
   beforeEach(() => mockedClient.mockReset());
 
+  it('surfaces a failed folder drain instead of silently dropping the folder filter', async () => {
+    // Falling back to an empty folder list hides the filter entirely, which
+    // reads as "this context has no folders" — so the results look unfiltered
+    // by choice when the filter was never offered.
+    stub({ folders: vi.fn().mockRejectedValue(new Error('400 invalid_cursor')) });
+
+    renderPage();
+
+    expect(
+      await screen.findByText(/couldn't load this context's folders/i),
+    ).toBeInTheDocument();
+    // Documents the consequence rather than guarding it: the pre-existing
+    // `folders.length > 0` gate hides the picker on an empty list too, so this
+    // holds with or without the fix. The `findByText` is what has the power.
+    expect(screen.queryByRole('combobox', { name: /folder/i })).not.toBeInTheDocument();
+  });
+
   it('prompts for a query before any search is run', () => {
     const content = vi.fn();
     stub({ content });

@@ -123,15 +123,10 @@ export function DocumentDetailPage(): React.JSX.Element {
   const foldersQuery = useQuery({
     queryKey: dataQueryKeys.folders(tenant, context),
     queryFn: () =>
-      drainPages<FolderResponse>(
-        async (startFrom) =>
-          (
-            await vectrosApiClient(tenant, context).folders.listFolders(
-              startFrom === undefined ? { limit: 100 } : { startFrom, limit: 100 },
-            )
-          ).data ?? [], // `{ data, nextCursor }` page envelope → items array
-        (f) => f.id,
-        100,
+      drainPages<FolderResponse>((startFrom) =>
+        vectrosApiClient(tenant, context).folders.listFolders(
+          startFrom === undefined ? { limit: 100 } : { startFrom, limit: 100 },
+        ),
       ),
   });
 
@@ -367,6 +362,15 @@ export function DocumentDetailPage(): React.JSX.Element {
   return (
     <Stack spacing={3}>
       {backButton}
+
+      {/* The folder drain feeds the edit dialog's picker. If it failed, the
+          picker would offer an empty list, which reads as "no folders exist"
+          and invites moving the document out of the folder it is in. */}
+      {foldersQuery.isError && (
+        <ApiErrorAlert error={foldersQuery.error}>
+          <FormattedMessage id="documentDetail.foldersError" />
+        </ApiErrorAlert>
+      )}
 
       <Box
         sx={{

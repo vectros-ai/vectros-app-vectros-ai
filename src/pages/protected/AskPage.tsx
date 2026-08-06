@@ -50,6 +50,7 @@ import { folderMenuItems } from '../../components/folderMenuItems';
 import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
 import { ModelPicker } from '../../components/ModelPicker';
 import { InferenceErrorAlert } from '../../components/InferenceErrorAlert';
+import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { useInferenceModels } from '../../hooks/useInferenceModels';
 import { useInferenceStream } from '../../hooks/useInferenceStream';
 
@@ -98,17 +99,12 @@ export function AskPage(): React.JSX.Element {
   const foldersQuery = useQuery({
     queryKey: dataQueryKeys.folders(tenant, context),
     queryFn: () =>
-      drainPages<FolderResponse>(
-        async (startFrom) =>
-          (
-            await vectrosApiClient(tenant, context).folders.listFolders(
-              startFrom === undefined
-                ? { limit: FOLDER_PAGE_SIZE }
-                : { startFrom, limit: FOLDER_PAGE_SIZE },
-            )
-          ).data ?? [], // `{ data, nextCursor }` page envelope → items array
-        (f) => f.id,
-        FOLDER_PAGE_SIZE,
+      drainPages<FolderResponse>((startFrom) =>
+        vectrosApiClient(tenant, context).folders.listFolders(
+          startFrom === undefined
+            ? { limit: FOLDER_PAGE_SIZE }
+            : { startFrom, limit: FOLDER_PAGE_SIZE },
+        ),
       ),
   });
   const folders = foldersQuery.data ?? [];
@@ -162,6 +158,14 @@ export function AskPage(): React.JSX.Element {
 
   return (
     <Stack spacing={2}>
+      {/* A failed folder drain must not pass for "this context has no folders":
+          the scope picker would simply not render, and the user would ask a
+          question believing it covers the whole context. */}
+      {foldersQuery.isError && (
+        <ApiErrorAlert error={foldersQuery.error}>
+          <FormattedMessage id="ai.ask.foldersError" />
+        </ApiErrorAlert>
+      )}
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
         <ModelPicker value={model} onChange={setModel} disabled={isStreaming} />
 

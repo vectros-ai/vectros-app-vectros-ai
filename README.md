@@ -23,7 +23,7 @@ Fork it. Re-brand it in one file. Point it at your own Cognito pool. Ship.
 | Capability | Implementation note |
 |---|---|
 | Context switcher | Pick any AppContext you can reach across your live/test environments; every query keys on `(tenant, context)` and a switch re-mints the scoped bearer. |
-| Records explorer + editor | Browse by type with schema-driven columns, client-side sort/filter, and server-side lookups (exact / range / prefix on the schema's lookup fields); create/edit in a dual-mode (typed form / raw JSON) editor with optimistic-concurrency conflict handling; archive/restore. |
+| Records explorer + editor | Browse by type with schema-driven columns, client-side sort/filter, and server-side lookups (exact / range / prefix on a single lookup field, or an exact match across every field of a composite lookup declared over several — optionally narrowed further by a sort-key window on an exact match); create/edit in a dual-mode (typed form / raw JSON) editor with optimistic-concurrency conflict handling; archive/restore. |
 | Documents | Browse by type and folder, look up by external ID or schema lookup fields, typed metadata, an in-app Markdown viewer (with click-to-view for file-backed documents), signed downloads, create via file upload or text ingest (optional external IDs + update-if-exists), archive/restore, and replace-a-file with automatic re-extraction and re-indexing. |
 | Folders | Create/rename/delete with server-side folder-scoped listing and "ask this folder" deep links into the AI workspace. |
 | Hybrid search | One ranked result set across records and documents: ranking mode (hybrid/semantic/keyword), content-source, folder, and type filters, offset paging. |

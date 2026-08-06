@@ -12,7 +12,7 @@ import type { TenantMembership } from '@vectros-ai/react';
 import { DocumentsPage } from './DocumentsPage';
 import { CurrentContextProvider } from '../../auth/CurrentContextProvider';
 import { TestProviders } from '../../test/TestProviders';
-import { pageOf } from '../../test/pageOf';
+import { pageOf, pageOfWithCursor, sealedCursor } from '../../test/pageOf';
 
 /** An empty inference stream — lets a documentAsk submit complete cleanly. */
 async function* emptyStream(): AsyncGenerator<never> {
@@ -142,6 +142,52 @@ describe('DocumentsPage', () => {
     const before = listDocuments.mock.calls.length;
     await user.click(screen.getByRole('button', { name: 'Refresh documents' }));
     await waitFor(() => expect(listDocuments.mock.calls.length).toBeGreaterThan(before));
+  });
+
+  it('drains a scope-filtered document list past page 1 on the opaque cursor', async () => {
+    // The live path the sealed cursor breaks: an ownership-scope filter makes
+    // the API mint an opaque composite cursor, and the second page is only
+    // reachable by echoing it back — a row id is refused outright. The middle
+    // page is EMPTY with a live cursor, because a scope filter is applied to
+    // each page after that page's cursor is captured.
+    const user = userEvent.setup();
+    const pages = [
+      pageOfWithCursor(
+        [{ id: 'doc_1', title: 'Scoped One', status: 'ACTIVE', indexStatus: 'INDEXED' }],
+        sealedCursor(1),
+      ),
+      pageOfWithCursor([], sealedCursor(2)),
+      pageOf([{ id: 'doc_2', title: 'Scoped Two', status: 'ACTIVE', indexStatus: 'INDEXED' }]),
+    ];
+    const listDocuments = vi.fn((req?: { scope?: string; startFrom?: string }) => {
+      // Unscoped (pre-filter) loads resolve empty so only the scoped drain is
+      // under test.
+      if (!req?.scope) return Promise.resolve(pageOf([]));
+      const startFrom = req.startFrom;
+      const index =
+        startFrom === undefined ? 0 : pages.findIndex((_, i) => sealedCursor(i) === startFrom);
+      if (index < 0) {
+        return Promise.reject(new Error(`400 invalid_cursor: ${JSON.stringify(startFrom)}`));
+      }
+      return Promise.resolve(pages[index]);
+    });
+    stub({
+      // A folder is what makes the filter row render at all.
+      folders: vi.fn().mockResolvedValue(pageOf([{ id: 'f1', name: 'Reports' }])),
+      documents: listDocuments,
+    });
+
+    renderPage();
+
+    await user.type(await screen.findByRole('textbox', { name: /owner scope/i }), 'org:acme');
+
+    // Both pages render — the row behind the empty page is NOT lost.
+    expect(await screen.findByRole('link', { name: 'Scoped Two' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Scoped One' })).toBeInTheDocument();
+    // The second request echoed the envelope's cursor verbatim.
+    expect(listDocuments).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: 'org:acme', startFrom: sealedCursor(1) }),
+    );
   });
 
   it('scopes the document list server-side by the selected folder', async () => {
@@ -401,6 +447,25 @@ describe('DocumentsPage', () => {
         'true',
       ),
     );
+  });
+
+  it('never offers a composite lookup field, even if one somehow appears on a document-viewable schema', async () => {
+    // A composite is structurally record-only (the server refuses one unless
+    // allowedSurfaces is EXACTLY ['record']), so this schema could never
+    // really carry one — this pins the defensive filter that keeps the
+    // documents picker correct even if that invariant were ever violated.
+    const user = userEvent.setup();
+    stub({
+      schemas: vi.fn().mockResolvedValue(
+        pageOf([{ ...DECISION_SCHEMA, lookupFields: [{ fieldNames: ['status', 'summary'] }] }]),
+      ),
+      documents: vi.fn().mockResolvedValue(pageOf(TYPED_DOCS)),
+    });
+    renderPage(['/?type=decision']);
+
+    await user.click(await screen.findByRole('combobox', { name: /look up by/i }));
+    expect(await screen.findByRole('option', { name: 'externalId' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'status,summary' })).not.toBeInTheDocument();
   });
 
   it('shows the lookup no-match state when a lookup returns nothing', async () => {

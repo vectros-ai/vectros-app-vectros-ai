@@ -1,49 +1,109 @@
 // ---------------------------------------------------------------------------
 // drainPages — exhaustively page a cursor-paginated Vectros SDK list endpoint.
 //
-// As of SDK 0.23 the list endpoints return the `{ data, nextCursor }`
-// page envelope (default 20 items/page); callers unwrap `.data` and hand this
-// paginator the bare item array. We follow the documented `startFrom` cursor =
-// the last item's `id` (via `cursorOf`) rather than the opaque `nextCursor`,
-// which keeps the same drain shape the auth lists used pre-0.23. Enumerations
-// that must be complete — the context switcher, the folder tree, the document
-// list — would silently lose everything past the first page without draining.
-// This is the one shared paginator both the auth layer (CurrentContextProvider)
-// and the data pages use.
+// A list endpoint returns the `{ data, nextCursor }` page envelope: at most
+// `limit` items plus a `nextCursor` that is null on the final page. `startFrom`
+// means "echo back the `nextCursor` you were given" — TREAT IT AS OPAQUE and
+// never construct one from row data. (Some endpoints, notably the version
+// histories, do mint a cursor that happens to look like a row id; that changes
+// nothing here, because echoing back what you were handed is correct for every
+// endpoint, and inferring one is correct for none.) Enumerations that must be
+// complete — the context switcher's profile listing, the folder tree, the
+// document list — would silently lose everything past the first page without
+// draining. This is the shared paginator the data pages and the auth layer's
+// SUB_USER path use; the switcher's OWNER path enumerates through the auth
+// package's own developer-API client, which drains on the same rules
+// separately.
+//
+// Two rules the shape depends on, both easy to get wrong:
+//
+//  1. NEVER terminate on a short or empty page. Server-side filtering (an
+//     ownership/scope filter, or the data scope a scoped credential carries)
+//     is applied to each page AFTER that page's cursor is captured, so a page
+//     can come back short — or completely empty — with rows still behind it.
+//     Stopping on `data.length < limit` re-introduces exactly the silent
+//     truncation this paginator exists to prevent. Only a null cursor ends it.
+//
+//  2. The bound counts PAGES, and it FAILS CLOSED. Do not reach for a
+//     new-cursor-vs-previous-cursor comparison as a no-progress guard: where
+//     the cursor is authenticated it carries a fresh nonce, so two cursors for
+//     the same position never compare equal and the test is permanently false —
+//     a guard that reads as defensive while guarding nothing. An empty page
+//     also advances the cursor without growing the item count, which is what
+//     makes a row-based bound unreachable on precisely the pathology it was
+//     written for. Counting pages is the only bound coupled to what the loop
+//     advances on, and on hitting it we THROW rather than return what we have:
+//     a partial result handed back silently is the original bug.
+//
+//     ⚠️ The bound must allow ONE MORE REQUEST than it allows pages of data. A
+//     listing of exactly `maxPages × limit` rows fills every page, and a FULL
+//     page still carries a live cursor — the server sets one whenever it stops
+//     on `limit`, because it cannot know the next read is empty. Bounding the
+//     requests instead of the pages therefore throws away a COMPLETE result at
+//     exactly the round number most likely to occur, which is the one case a
+//     safety valve must not turn into a failure. The extra request is the probe
+//     that distinguishes "exhausted" from "more to come"; a drain that never
+//     spends it cannot tell those apart at the boundary.
 // ---------------------------------------------------------------------------
 
-/** Default safety ceiling on pages drained (guards a non-advancing cursor). */
+/** A single page: the items plus the opaque next-page cursor (null when exhausted). */
+export interface CursorPage<T> {
+  readonly data?: readonly T[] | undefined;
+  readonly nextCursor?: (string | null) | undefined;
+}
+
+/** Default safety ceiling on pages drained (guards a cursor that never goes null). */
 const DEFAULT_MAX_PAGES = 50;
 
 /**
- * Drain every page of a cursor-paginated list endpoint.
+ * Drain every page of a cursor-paginated list endpoint into one array.
  *
- * `fetchPage(startFrom)` returns one page (≤ `pageSize` items); we follow
- * `startFrom` = the last item's cursor (via `cursorOf`) until a short page (the
- * last one) or the cursor stops advancing (defensive — a non-advancing cursor
- * would otherwise loop). Bounded by `maxPages`.
+ * `fetchPage(startFrom)` returns one `{ data, nextCursor }` page (`startFrom` is
+ * `undefined` on the first call). We follow `nextCursor` until it is
+ * null/absent, which is the ONLY terminal condition — a short or empty page
+ * with a live cursor is normal and the drain continues through it.
  *
- * @param fetchPage fetch a single page given the previous page's cursor (omit on the first page)
- * @param cursorOf  extract the pagination cursor (typically `id`) from an item
- * @param pageSize  the page size requested — a returned page shorter than this ends the drain
- * @param maxPages  hard ceiling on pages (default 50)
+ * @param fetchPage fetch a single page given the previous page's cursor (undefined on the first page)
+ * @param maxPages  how many pages are chased before the drain refuses (default
+ *                  50). Note this is NOT a bound on rows accumulated: the final
+ *                  iteration is usually the terminal probe, but a listing that
+ *                  ends exactly there returns its data too, so a successful
+ *                  drain can hold up to `(maxPages + 1) × limit` rows
+ * @throws if the cursor is still live once that allowance is spent — the result
+ *         would be partial, and a silently partial enumeration is the failure
+ *         this paginator exists to prevent
  */
 export async function drainPages<T>(
-  fetchPage: (startFrom: string | undefined) => Promise<ReadonlyArray<T>>,
-  cursorOf: (item: T) => string | undefined,
-  pageSize: number,
+  fetchPage: (startFrom: string | undefined) => Promise<CursorPage<T>>,
   maxPages: number = DEFAULT_MAX_PAGES,
 ): Promise<T[]> {
   const all: T[] = [];
   let startFrom: string | undefined;
-  for (let page = 0; page < maxPages; page++) {
-    const items = await fetchPage(startFrom);
-    all.push(...items);
-    if (items.length < pageSize) break;
-    const last = items[items.length - 1];
-    const cursor = last ? cursorOf(last) : undefined;
-    if (!cursor || cursor === startFrom) break; // no progress → stop (defensive)
-    startFrom = cursor;
+  // `<=`, not `<`: the final iteration is the terminal probe (see rule 2). A
+  // full last page carries a live cursor, so bounding the REQUESTS rather than
+  // the pages would fail a complete listing of exactly `maxPages × limit` rows.
+  for (let page = 0; page <= maxPages; page++) {
+    const { data, nextCursor } = await fetchPage(startFrom);
+    if (data) all.push(...data);
+    // Null or absent means exhausted. Nothing else ends the drain.
+    //
+    // A blank cursor is folded in here, and that IS an asymmetry in an
+    // otherwise fail-closed function — it returns rather than throws. Two
+    // reasons it is the right one. Echoing `''` back is the worst option: the
+    // server reads a blank `startFrom` as "no resume position" and restarts the
+    // listing at page one, so the drain would never end. And no server path
+    // emits it — an empty key encodes as a null cursor — so this branch is
+    // defensive only, and throwing on it would convert an impossible response
+    // into a user-visible failure while proving nothing.
+    if (!nextCursor) return all;
+    startFrom = nextCursor;
   }
-  return all;
+  // Both numbers, because they describe different incidents: "5000 items over
+  // 51 requests" is a listing genuinely larger than the ceiling, "0 items over
+  // 51 requests" is a cursor that never resolves. Requests, not pages, because
+  // that is the count actually made — the terminal probe is one of them.
+  throw new Error(
+    `drainPages: the listing is still not exhausted after ${maxPages + 1} requests ` +
+      `(${all.length} items). Refusing to return a partial result.`,
+  );
 }

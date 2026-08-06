@@ -57,7 +57,14 @@ function stubRag(
   impl: (req: unknown) => Promise<AsyncIterable<unknown>>,
 ): ReturnType<typeof vi.fn> {
   const ragInference = vi.fn(impl);
-  mockedClient.mockReturnValue({ inference: { ragInference } } as never);
+  // The folder drain must be stubbed even by cells that only care about RAG:
+  // omitting it makes the drain throw, and the page now SURFACES that as an
+  // error alert rather than silently rendering no scope picker — which would
+  // leave these cells asserting against two alerts instead of the one they name.
+  mockedClient.mockReturnValue({
+    inference: { ragInference },
+    folders: { listFolders: vi.fn().mockResolvedValue(pageOf([])) },
+  } as never);
   return ragInference;
 }
 
@@ -260,6 +267,32 @@ describe('AskPage', () => {
       search?: { contentTypes?: string[]; folderId?: string };
     };
     expect(req.search).toEqual({ contentTypes: ['documents'] });
+  });
+
+  it('surfaces a failed folder drain instead of silently offering no scope picker', async () => {
+    // A drained enumeration can now fail loudly (an unresolvable cursor, or a
+    // listing past the drain's page ceiling). Falling back to an empty folder
+    // list would hide the picker entirely, which reads as "this context has no
+    // folders" — so the user asks a question believing it covers the whole
+    // context when the scoping UI simply failed to load.
+    const ragInference = vi.fn((_req: unknown) => Promise.resolve(ragStream()));
+    mockedClient.mockReturnValue({
+      inference: { ragInference },
+      folders: { listFolders: vi.fn().mockRejectedValue(new Error('400 invalid_cursor')) },
+    } as never);
+    renderPage();
+
+    // Matched by TEXT, not by role: the page already renders an info alert
+    // synchronously, so `findByRole('alert')` would resolve on that one before
+    // the folder query has even rejected.
+    const alert = await screen.findByText(/couldn't load this context's folders/i);
+    expect(alert).toBeInTheDocument();
+    // The picker is absent — but note this assertion does NOT guard the fix. It
+    // holds either way, because the pre-existing `folders.length > 0` gate hides
+    // the picker on an empty list too. It is here to document WHY the alert has
+    // to exist (absent picker + no message = a silent failure), not to detect a
+    // regression; the `findByText` above is what would fail.
+    expect(screen.queryByRole('combobox', { name: /folder/i })).not.toBeInTheDocument();
   });
 
   it('scopes RAG to the selected folder', async () => {

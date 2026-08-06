@@ -94,6 +94,28 @@ describe('DocumentDetailPage', () => {
   beforeEach(() => mockedClient.mockReset());
   afterEach(() => vi.unstubAllGlobals());
 
+  it('surfaces a failed folder drain rather than offering an empty folder picker', async () => {
+    // The drain feeds the edit dialog's picker. An empty list there reads as
+    // "no folders exist" and invites moving the document out of the folder it
+    // is actually in.
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Q1 Report',
+        status: 'ACTIVE',
+        indexStatus: 'INDEXED',
+        version: 1,
+      }),
+      folders: vi.fn().mockRejectedValue(new Error('400 invalid_cursor')),
+    });
+
+    renderDetail();
+
+    expect(
+      await screen.findByText(/couldn't load this context's folders/i),
+    ).toBeInTheDocument();
+  });
+
   it('renders metadata, a download action, and the extracted text', async () => {
     const getDocumentText = vi.fn().mockResolvedValue({ id: 'doc_1', text: 'Hello world' });
     stub({

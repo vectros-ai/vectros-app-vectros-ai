@@ -57,6 +57,7 @@ import { drainPages } from '../../lib/drainPages';
 import { distinctTypes } from '../../lib/schemaSurfaces';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { folderMenuItems } from '../../components/folderMenuItems';
+import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
 
 /** Result page size — the API caps at 100; 25 is a reasonable page. */
@@ -112,17 +113,12 @@ export function SearchPage(): React.JSX.Element {
   const foldersQuery = useQuery({
     queryKey: dataQueryKeys.folders(tenant, context),
     queryFn: () =>
-      drainPages<FolderResponse>(
-        async (startFrom) =>
-          (
-            await vectrosApiClient(tenant, context).folders.listFolders(
-              startFrom === undefined
-                ? { limit: FOLDER_PAGE_SIZE }
-                : { startFrom, limit: FOLDER_PAGE_SIZE },
-            )
-          ).data ?? [],
-        (f) => f.id,
-        FOLDER_PAGE_SIZE,
+      drainPages<FolderResponse>((startFrom) =>
+        vectrosApiClient(tenant, context).folders.listFolders(
+          startFrom === undefined
+            ? { limit: FOLDER_PAGE_SIZE }
+            : { startFrom, limit: FOLDER_PAGE_SIZE },
+        ),
       ),
   });
   const folders = foldersQuery.data ?? [];
@@ -202,6 +198,15 @@ export function SearchPage(): React.JSX.Element {
           <FormattedMessage id="search.subtitle" />
         </Typography>
       </Box>
+
+      {/* A failed folder drain must not pass for "this context has no folders":
+          the folder filter would simply not render, and the user would read the
+          results as unfiltered when the filter was never offered. */}
+      {foldersQuery.isError && (
+        <ApiErrorAlert error={foldersQuery.error}>
+          <FormattedMessage id="search.foldersError" />
+        </ApiErrorAlert>
+      )}
 
       <Stack spacing={2}>
         <Box component="form" onSubmit={handleSubmit}>
