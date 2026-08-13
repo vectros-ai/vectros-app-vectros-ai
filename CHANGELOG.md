@@ -3,6 +3,12 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.13.0 — 2026-08-12
+
+### Changed
+
+- **Repinned to `@vectros-ai/sdk` 0.39.0.**
+
 ## 0.12.0 — 2026-08-05
 
 ### Changed
