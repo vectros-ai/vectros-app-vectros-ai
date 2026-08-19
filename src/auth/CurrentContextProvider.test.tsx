@@ -21,12 +21,14 @@ vi.mock('@vectros-ai/react', async (importOriginal) => {
   return { ...actual, clearVectrosApiTokenCache: vi.fn() };
 });
 import { CurrentTenantProvider, clearVectrosApiTokenCache } from '@vectros-ai/react';
-import type { AuthProviderAdapter, TenantMembership } from '@vectros-ai/react';
+import type { TenantMembership } from '@vectros-ai/react';
 
 import { CurrentContextProvider } from './CurrentContextProvider';
 import { useCurrentContext } from './useCurrentContext';
 import type { AppContextOption } from './useCurrentContext';
 import { TestProviders } from '../test/TestProviders';
+import { makeMockAuthProvider } from '../test/mockAuthProvider';
+import type { FullMockProvider } from '../test/mockAuthProvider';
 import { pageOf, pageOfWithCursor, sealedCursor } from '../test/pageOf';
 
 // Mock the data-plane SDK client — the provider's only outbound dependency.
@@ -81,16 +83,24 @@ function KindProbe(): React.JSX.Element {
 function renderWithRole(
   role: 'OWNER' | 'SUB_USER',
   partnerUserId: string | null = null,
-  authOverrides: Partial<AuthProviderAdapter> = {},
+  tenancyOverrides: Partial<FullMockProvider> = {},
 ): void {
+  // getActivePartnerUserId/listAppContexts are VectrosTenancyProvider methods,
+  // surfaced through CurrentTenantProvider's tenancyProvider pass-through (not
+  // useAuth()) — build ONE adapter and give it to both TestProviders (so
+  // <AuthProvider> sees it) and CurrentTenantProvider (so its pass-throughs
+  // actually call these overrides).
+  const adapter = makeMockAuthProvider({
+    getActivePartnerUserId: vi.fn().mockResolvedValue(partnerUserId),
+    ...tenancyOverrides,
+  });
   render(
-    <TestProviders
-      authOverrides={{
-        getActivePartnerUserId: vi.fn().mockResolvedValue(partnerUserId),
-        ...authOverrides,
-      }}
-    >
-      <CurrentTenantProvider initialMemberships={[membership(role)]} initialTenant={TENANT}>
+    <TestProviders adapter={adapter}>
+      <CurrentTenantProvider
+        tenancyProvider={adapter}
+        initialMemberships={[membership(role)]}
+        initialTenant={TENANT}
+      >
         <CurrentContextProvider>
           <Probe />
         </CurrentContextProvider>
@@ -140,9 +150,11 @@ describe('CurrentContextProvider enumeration', () => {
       ),
     );
 
+    const adapter = makeMockAuthProvider({ listAppContexts });
     render(
-      <TestProviders authOverrides={{ listAppContexts }}>
+      <TestProviders adapter={adapter}>
         <CurrentTenantProvider
+          tenancyProvider={adapter}
           initialMemberships={[
             { tenantId: LIVE, tenantName: 'Live', tenantKind: 'live', role: 'OWNER', status: 'ACTIVE', partnerId: 'ptr_0001' },
             { tenantId: TEST, tenantName: 'Test', tenantKind: 'test', role: 'OWNER', status: 'ACTIVE', partnerId: 'ptr_0001' },
@@ -178,9 +190,11 @@ describe('CurrentContextProvider enumeration', () => {
           ]),
     );
 
+    const adapter = makeMockAuthProvider({ listAppContexts });
     render(
-      <TestProviders authOverrides={{ listAppContexts }}>
+      <TestProviders adapter={adapter}>
         <CurrentTenantProvider
+          tenancyProvider={adapter}
           initialMemberships={[
             { tenantId: LIVE, tenantName: 'Live', tenantKind: 'live', role: 'OWNER', status: 'ACTIVE', partnerId: 'ptr_0001' },
             { tenantId: TEST, tenantName: 'Test', tenantKind: 'test', role: 'OWNER', status: 'ACTIVE', partnerId: 'ptr_0001' },

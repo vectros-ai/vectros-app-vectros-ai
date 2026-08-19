@@ -21,8 +21,11 @@ import { ThemeProvider, CssBaseline } from '@mui/material';
 import { BrowserRouter } from 'react-router';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
-import { AuthProvider, CognitoAuthProvider, CurrentTenantProvider, ErrorBoundary, VersionUpdateBanner } from '@vectros-ai/react';
+import { AuthProvider, CurrentTenantProvider, ErrorBoundary, VersionUpdateBanner } from '@vectros-ai/react';
 import { setPartnerApiTokenMinter } from '@vectros-ai/react';
+// CognitoAuthProvider is its own subpath (not value-exported from the main
+// @vectros-ai/react barrel — see that package's tsup.config.ts for why).
+import { CognitoAuthProvider } from '@vectros-ai/react/providers/cognito';
 
 import App from './App';
 import { CurrentContextProvider } from './auth/CurrentContextProvider';
@@ -145,7 +148,7 @@ ReactDOM.createRoot(rootElement).render(
                   Provider + ContextSwitcher) layers on top of this in a
                   follow-up commit.
                 */}
-                <CurrentTenantProvider>
+                <CurrentTenantProvider tenancyProvider={authProvider}>
                   {/*
                     CurrentContextProvider sits inside CurrentTenantProvider
                     because it enumerates contexts per the active tenant + role,

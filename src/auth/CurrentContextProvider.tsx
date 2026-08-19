@@ -2,10 +2,12 @@
 // CurrentContextProvider — owns the active-AppContext state + the context-switch
 // orchestration for app.vectros.ai's data plane.
 //
-// Sits inside <AuthProvider> (needs useAuth, for getActivePartnerUserId),
-// <CurrentTenantProvider> (needs the membership set + the caller's role), and
-// <QueryClientProvider> (needs the query client to refetch on switch). See
-// main.tsx for the nesting.
+// Sits inside <CurrentTenantProvider> (needs the membership set, the caller's
+// role, AND — via useCurrentTenant()'s pass-throughs — getActivePartnerUserId/
+// listAppContexts, sourced from CurrentTenantProvider's own tenancyProvider
+// prop, not from useAuth(): multi-tenancy is Vectros-specific and isn't part
+// of the generic auth context) and <QueryClientProvider> (needs the query
+// client to refetch on switch). See main.tsx for the nesting.
 //
 // Enumeration — the data plane SPANS TENANTS. A selectable option is a
 // `(tenant, context)` pair, so the switcher can offer, e.g., the `default`
@@ -37,7 +39,7 @@ import { useQueryClient } from '@tanstack/react-query';
 
 // Import the shared auth bits directly from the package (NOT via '../auth',
 // which re-exports THIS module — that would be an import cycle).
-import { useAuth, useCurrentTenant, clearVectrosApiTokenCache } from '@vectros-ai/react';
+import { useCurrentTenant, clearVectrosApiTokenCache } from '@vectros-ai/react';
 import type {
   AppContextSummary,
   ListAppContextsOptions,
@@ -194,8 +196,14 @@ export function CurrentContextProvider({
   initialContexts,
   initialContext,
 }: CurrentContextProviderProps): React.JSX.Element {
-  const { tenant, activeMembership, memberships, loading: tenantLoading } = useCurrentTenant();
-  const { getActivePartnerUserId, listAppContexts } = useAuth();
+  const {
+    tenant,
+    activeMembership,
+    memberships,
+    loading: tenantLoading,
+    getActivePartnerUserId,
+    listAppContexts,
+  } = useCurrentTenant();
   const queryClient = useQueryClient();
 
   const seeded = initialContexts !== undefined;

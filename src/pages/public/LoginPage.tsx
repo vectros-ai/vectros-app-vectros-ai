@@ -20,9 +20,14 @@
 // plane. Under the current OPTIONAL-MFA pool config a fully
 // provisioned user only ever hits COMPLETE or MFA_REQUIRED.
 //
-// The page is auth-provider-agnostic — it consumes only useAuth() + the
-// normalized SignInResult union + the AuthError vocabulary. Swap providers
-// without touching this file.
+// This page is Cognito/embedded-specific by construction: it destructures
+// signIn/confirmSignIn straight off useAuth(), which are
+// EmbeddedCredentialAuth-only methods a hosted-redirect provider (Auth0
+// Universal Login) doesn't implement — this app's useAuth() (src/auth/index.ts)
+// asserts that facet is present, so wiring in Auth0AuthProvider throws
+// immediately on mount here rather than silently degrading. A fork on Auth0
+// wouldn't route through this page at all: sign-in is Auth0's own hosted UI,
+// reached via signInWithRedirect() instead.
 // ---------------------------------------------------------------------------
 
 import { useState } from 'react';

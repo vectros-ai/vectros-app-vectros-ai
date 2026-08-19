@@ -10,7 +10,14 @@
 //   - `initialEntries` seeds the MemoryRouter history (default `['/']`).
 //   - `authOverrides` pins specific adapter methods (e.g. a signed-in user,
 //     a signIn that resolves MFA_REQUIRED). Defaults come from
-//     makeMockAuthProvider.
+//     makeMockAuthProvider. Ignored when `adapter` is supplied.
+//   - `adapter` supplies an already-built mock adapter instead of one built
+//     from `authOverrides` — needed when a test ALSO wraps children in its
+//     own `<CurrentTenantProvider tenancyProvider={...}>` (getActivePartnerUserId/
+//     listAppContexts are VectrosTenancyProvider methods surfaced through
+//     CurrentTenantProvider's pass-through now, not through useAuth() — see
+//     CurrentContextProvider.test.tsx) and needs the SAME adapter instance in
+//     both places so overrides on tenancy methods actually take effect.
 //
 // Tests that need the active-tenant context (CurrentTenantProvider) wrap their
 // subject in it explicitly — most shell tests don't, because useCurrentTenant
@@ -22,10 +29,10 @@ import { MemoryRouter } from 'react-router';
 import type { Location } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from '@vectros-ai/react';
-import type { AuthProviderAdapter } from '@vectros-ai/react';
 
 import { I18N_DEFAULT_LOCALE, IntlProvider } from '../i18n/IntlProvider';
 import { makeMockAuthProvider } from './mockAuthProvider';
+import type { FullMockProvider } from './mockAuthProvider';
 
 interface TestProvidersProps {
   readonly children: ReactNode;
@@ -35,14 +42,17 @@ interface TestProvidersProps {
    * state such as a deep-link `from` redirect target.
    */
   readonly initialEntries?: ReadonlyArray<string | Partial<Location>>;
-  /** Auth-adapter method overrides merged over makeMockAuthProvider defaults. */
-  readonly authOverrides?: Partial<AuthProviderAdapter>;
+  /** Auth-adapter method overrides merged over makeMockAuthProvider defaults. Ignored when `adapter` is supplied. */
+  readonly authOverrides?: Partial<FullMockProvider>;
+  /** Pre-built mock adapter, used as-is instead of building one from `authOverrides`. See module header. */
+  readonly adapter?: FullMockProvider;
 }
 
 export function TestProviders({
   children,
   initialEntries = ['/'],
   authOverrides,
+  adapter,
 }: TestProvidersProps): React.JSX.Element {
   // A test-strict client: no retries, no background refetch, infinite gc so
   // assertion timing is deterministic. Constructed per render (each test's
@@ -57,7 +67,9 @@ export function TestProviders({
     <MemoryRouter initialEntries={[...initialEntries]}>
       <QueryClientProvider client={queryClient}>
         <IntlProvider locale={I18N_DEFAULT_LOCALE}>
-          <AuthProvider provider={makeMockAuthProvider(authOverrides)}>{children}</AuthProvider>
+          <AuthProvider provider={adapter ?? makeMockAuthProvider(authOverrides)}>
+            {children}
+          </AuthProvider>
         </IntlProvider>
       </QueryClientProvider>
     </MemoryRouter>

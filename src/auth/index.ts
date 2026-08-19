@@ -12,9 +12,33 @@
 //
 // To swap auth providers in a fork: implement AuthProviderAdapter (see
 // @vectros-ai/react) and construct it in main.tsx; nothing here changes.
+//
+// **`useAuth` is narrowed, not re-exported bare** — same reasoning as
+// admin-app's `src/auth/index.ts`: the package's own `AuthContextValue`
+// marks every embedded-credential method optional (a hosted-redirect
+// provider wouldn't have them at all), but this app is ALWAYS Cognito/
+// embedded (`main.tsx` only ever constructs a `CognitoAuthProvider`), so
+// narrowing once here keeps LoginPage/HomePage/etc. fully typed with no
+// per-call-site optional-chaining.
+//
+// The narrowing uses `assertEmbeddedAuth` (a real runtime check backing the
+// type assertion), NOT a bare `as` cast — a cast would silently lie if a
+// future change ever repoints main.tsx at a hosted-redirect provider without
+// updating this file; the assertion instead throws immediately, with a clear
+// message, at the first `useAuth()` call after such a mismatch.
 // ---------------------------------------------------------------------------
 
+import { assertEmbeddedAuth, useAuth as useAuthBase } from '@vectros-ai/react';
+import type { AuthContextValue, EmbeddedCredentialAuth } from '@vectros-ai/react';
+
 export * from '@vectros-ai/react';
+
+/** This app's fully-typed `useAuth()` — see the module header for why. */
+export function useAuth(): AuthContextValue & EmbeddedCredentialAuth {
+  const value = useAuthBase();
+  assertEmbeddedAuth(value);
+  return value;
+}
 
 // Data-plane current-context state (app.vectros.ai-specific; layered on the
 // shared auth stack). Re-exported here so call sites import the whole auth

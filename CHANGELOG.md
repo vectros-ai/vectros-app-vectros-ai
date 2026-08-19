@@ -3,6 +3,22 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.14.0 — 2026-08-19
+
+### Changed
+
+- **Repinned to `@vectros-ai/react` 0.8.0** — the multi-tenant developer-portal methods
+  (`getMemberships`/`getActiveTenant`/`listAppContexts`/etc.) moved out of the package's generic
+  `useAuth()` surface into a `tenancyProvider` prop on `CurrentTenantProvider` (see that package's
+  CHANGELOG for the full reasoning). `main.tsx` now passes the same Cognito adapter to both
+  `<AuthProvider>` and `<CurrentTenantProvider tenancyProvider={...}>`; `CurrentContextProvider` now
+  reads `getActivePartnerUserId`/`listAppContexts` from `useCurrentTenant()` instead of `useAuth()`.
+  No user-visible behavior change.
+- **Repinned to `@vectros-ai/sdk` 0.40.0.** No API surface this app uses changed shape — this app has
+  no usage/billing display (see `ui/admin-app` for that), doesn't call `/v1/auth/token/exchange`
+  (Cognito-only), and has no error-code/message branching touched by this release's changes; see the
+  [SDK changelog](https://github.com/vectros-ai/sdk/blob/main/CHANGELOG.md) for the full release.
+
 ## 0.13.0 — 2026-08-12
 
 ### Changed

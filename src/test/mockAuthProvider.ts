@@ -16,11 +16,18 @@
 
 import { vi } from 'vitest';
 
-import type { AuthProviderAdapter } from '@vectros-ai/react';
+import type {
+  AuthProviderAdapter,
+  EmbeddedCredentialAuth,
+  VectrosTenancyProvider,
+} from '@vectros-ai/react';
+
+/** The full shape CognitoAuthProvider implements — this app is always this shape. */
+export type FullMockProvider = AuthProviderAdapter & EmbeddedCredentialAuth & VectrosTenancyProvider;
 
 export function makeMockAuthProvider(
-  overrides: Partial<AuthProviderAdapter> = {},
-): AuthProviderAdapter {
+  overrides: Partial<FullMockProvider> = {},
+): FullMockProvider {
   return {
     // Value-returning methods default to a benign "empty" result. signIn /
     // confirmSignIn / signUp have no obvious empty value — a test that drives

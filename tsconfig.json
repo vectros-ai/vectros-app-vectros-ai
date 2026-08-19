@@ -31,6 +31,10 @@
       // the src alias in vite.config.ts (fast dev). Run `npm run build -w
       // @vectros-ai/react` after changing the lib's types. (Both go away at the
       // registry-pin release cut.)
+      // CognitoAuthProvider is its own entry point, not value-exported from
+      // the main bundle (see that package's tsup.config.ts) — mirror the
+      // alias above for the subpath this app actually imports.
+      "@vectros-ai/react/providers/cognito": ["../../packages/react/dist/auth/providers/cognito.d.ts"],
       // Pin react/react-dom types to THIS app's single @types copy. The flat lib
       // .d.ts still imports `react` types, which tsc resolves from the repo root
       // — a SECOND @types/react identity. It's latent here (no MUI Autocomplete
