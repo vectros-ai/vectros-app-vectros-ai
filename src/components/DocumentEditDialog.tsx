@@ -34,7 +34,15 @@ import {
   TextField,
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
-import { SubmitButton } from '@vectros-ai/react';
+import {
+  RecordFormFields,
+  SubmitButton,
+  coerceFieldValue,
+  isReservedPayloadKey,
+  stripReservedPayloadKeys,
+  validateFields,
+  withField,
+} from '@vectros-ai/react';
 import { FormattedMessage, useIntl } from 'react-intl';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -43,15 +51,7 @@ import { vectrosApiClient } from '../api/vectrosApi';
 import type { DocumentResponse, FolderResponse, SchemaResponse } from '../api/vectrosApi';
 import { dataQueryKeys } from '../lib/dataQueryKeys';
 import { isVersionConflict } from '../lib/apiError';
-import {
-  coerceFieldValue,
-  isReservedPayloadKey,
-  stripReservedPayloadKeys,
-  validateFields,
-  withField,
-} from '../lib/recordForm';
 import { ApiErrorAlert } from './ApiErrorAlert';
-import { RecordFormFields } from './RecordFormFields';
 import { folderMenuItems } from './folderMenuItems';
 
 const KEEP_FOLDER = '';

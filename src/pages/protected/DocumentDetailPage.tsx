@@ -43,7 +43,14 @@ import FileDownload from '@mui/icons-material/FileDownload';
 import UnarchiveOutlined from '@mui/icons-material/UnarchiveOutlined';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
-import { ConfirmDialog, LoadingBlock, MetaList, MetaRow } from '@vectros-ai/react';
+import {
+  ConfirmDialog,
+  LoadingBlock,
+  MetaList,
+  MetaRow,
+  fieldLabel,
+  formatCellValue,
+} from '@vectros-ai/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
@@ -64,8 +71,6 @@ import {
   isInlineViewableMarkdownFile,
   orderedPayloadFields,
 } from '../../lib/documentTypes';
-import { formatCellValue } from '../../lib/recordColumns';
-import { fieldLabel } from '../../lib/recordForm';
 import { MarkdownView } from '../../components/MarkdownView';
 import { DocumentEditDialog } from '../../components/DocumentEditDialog';
 import { DocumentAskDrawer } from '../../components/DocumentAskDrawer';

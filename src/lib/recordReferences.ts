@@ -13,8 +13,8 @@
 // ---------------------------------------------------------------------------
 
 import type { Vectros } from '../api/vectrosApi';
-import { fieldLabel } from './recordForm';
-import type { RenderHints } from './recordForm';
+import { fieldLabel } from '@vectros-ai/react';
+import type { RenderHints } from '@vectros-ai/react';
 
 type FieldDef = Vectros.FieldDef;
 

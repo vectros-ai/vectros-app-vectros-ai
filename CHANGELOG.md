@@ -3,6 +3,42 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.16.0 — 2026-08-27
+
+### Added
+
+- **Composite lookup: the leading-run PARTIAL tuple is now offered, not just the fully-specified
+  case.** A composite lookup (`LookupPanel`, declared over several fields at once) previously required
+  a value for every declared leg before Apply enabled. The API also accepts a leading run — a lookup
+  over `[status, area]` may match on `status` alone — and returns every match grouped by the field(s)
+  left unspecified. The panel now offers this: a leg is disabled until its predecessor has a value
+  (so its own state can never express a gap the API wouldn't accept), Apply enables once the first leg
+  is filled, and a hint names which field(s) the results will be grouped by. The records explorer shows
+  a matching "grouped by: …" note and drops client-side column sorting while a grouped result set is
+  displayed — sorting would silently flatten the server's adjacency-expressed grouping back into one
+  undifferentiated order. The sort-key window (`sortFrom`/`sortTo`) still requires every leg filled,
+  unchanged — narrowing is only continuous within one fully-specified combination.
+
+### Changed
+
+- **Repinned to `@vectros-ai/sdk` 0.41.0.** No API surface this app uses changed shape — same
+  no-usage-display, Cognito-only, no-error-branching footprint noted at the 0.40.0 repin below still
+  holds, and this app doesn't adopt the new `roleIds` access-profile field or the issuer-update
+  endpoint; see the [SDK changelog](https://github.com/vectros-ai/sdk/blob/main/CHANGELOG.md) for the
+  full release.
+
+## 0.15.0 — 2026-08-25
+
+### Changed
+
+- **Repinned to `@vectros-ai/react` 0.9.0** and switched the schema-driven record form/list rendering
+  stack (`schemaSurfaces`/`recordForm`/`recordColumns`/`RecordFormFields`) to import it from the
+  package instead of the app-local copies under `src/lib`/`src/components`, which are removed. No
+  behavior change — this app's own tests port unchanged and still pass; the four `recordForm.*`
+  message strings move to the package's base English catalog (already merged in via `baseMessagesEn`).
+  `RecordEditorPage.tsx`'s dual-mode (typed/raw) + optimistic-concurrency (409) pattern stays app-local
+  reference wiring around the shared primitives.
+
 ## 0.14.0 — 2026-08-19
 
 ### Changed

@@ -5,9 +5,15 @@
 // Pick a lookup field, a match mode (exact always; range from/to + prefix on
 // range-enabled fields), and a sort direction, then Apply. A composite field
 // (declared over more than one field, no single `fieldName`) instead offers
-// one value input per declared field, in declaration order, and submits an
-// exact match under `values[]` — a composite is always equality-only, never
-// range/prefix-eligible (the server refuses that pairing at declare time).
+// one value input per declared field, in declaration order, and submits under
+// `values[]` — always equality-only, never range/prefix-eligible (the server
+// refuses that pairing at declare time). A composite value doesn't need every
+// leg filled: a LEADING RUN (the first N of its declared legs) is also legal
+// and matches every combination of the legs left blank, grouped by them — a
+// later leg is disabled until its predecessor has a value, so the panel's own
+// state can never express a gap the API wouldn't accept. The sort-key window
+// (`sortFrom`/`sortTo`) is offered only once every leg is filled — narrowing
+// is only continuous within one fully-specified combination.
 //
 // The panel owns the in-progress input state; the page owns the APPLIED
 // lookup (the thing its query keys on), delivered via `onApply` only on
@@ -133,6 +139,27 @@ export interface LookupFieldDef {
   readonly sortBy?: string | undefined;
 }
 
+/**
+ * The count of contiguous, non-blank values from the start of `values` — the
+ * leading run the API's composite lookup accepts. By construction (leg `i`'s
+ * input is disabled once leg `i-1` is blank, and clearing a leg cascades to
+ * clear every leg after it — see the composite leg `onChange` below) the
+ * panel's own state is always already a valid leading run; this is the one
+ * place that turns "how many legs are actually filled" into a number, used
+ * both to decide readiness and to trim the array sent to the API (an unfilled
+ * trailing leg must be OMITTED, not sent as `''`, or a 3-leg composite with
+ * one value would submit `['open', '', '']` — a 3-value tuple with two empty
+ * legs — instead of the 1-value partial tuple `['open']` the API expects).
+ */
+function leadingNonBlankCount(values: readonly string[]): number {
+  let count = 0;
+  for (const v of values) {
+    if (v.trim() === '') break;
+    count++;
+  }
+  return count;
+}
+
 /** A def resolved to what the panel actually renders/submits for it. */
 type SelectableDef =
   | {
@@ -227,9 +254,9 @@ export function LookupPanel({
   const compositeLegValues: readonly string[] = isComposite
     ? selectedDef.legs.map((_, i) => compositeValues[i] ?? '')
     : [];
-  // Sort continuity requires the FULL tuple (per the API's own contract) —
-  // explicit, not incidental, so this stays correct if a leading-run partial
-  // tuple is ever offered: while any leg is still unfilled, no sort window.
+  // Sort continuity requires the FULL tuple (per the API's own contract,
+  // confirmed server-side by a 400 on `sortFrom`/`sortTo` alongside a partial
+  // tuple) — while any leg is still unfilled, no sort window.
   const compositeIsFullTuple = isComposite && compositeLegValues.every((v) => v.trim() !== '');
   const rangeAvailable = selectedDef?.kind === 'plain' && selectedDef.rangeEnabled === true;
   // A non-range field can only do exact match, whatever the mode toggle last held.
@@ -242,14 +269,30 @@ export function LookupPanel({
     (isComposite ? compositeIsFullTuple : effectiveMode === 'exact') &&
     selectedDef !== undefined &&
     sortUnitsKnown(selectedDef.sortBy);
+  // A composite is submittable once its FIRST leg has a value — the API
+  // accepts a leading run shorter than the full declared tuple (a partial
+  // tuple, grouped by the legs left blank); it never accepts a gap (a blank
+  // leg followed by a filled one), which the leg-disabling below prevents by
+  // construction.
+  const compositeLeadingCount = leadingNonBlankCount(compositeLegValues);
+  // Whether the panel's CURRENT (possibly unsubmitted) composite tuple is
+  // exactly what's already applied — i.e. nothing has changed since the last
+  // Apply. Used to suppress the panel's own partial-tuple hint once it would
+  // just be repeating the host page's own "grouped by" note for the results
+  // already on screen; re-editing the legs afterward (composing a NEW lookup)
+  // makes this false again, so the panel's forward guidance comes back for
+  // whatever isn't submitted yet.
+  const composedMatchesApplied =
+    isComposite &&
+    applied !== null &&
+    applied.mode === 'multi' &&
+    applied.field === lookupField &&
+    applied.values.length === compositeLeadingCount &&
+    applied.values.every((v, i) => v === compositeLegValues[i]?.trim());
   const lookupReady =
     lookupField !== '' &&
     (isComposite
-      ? // Deliberately requires every leg — the API also accepts a leading-run
-        // PARTIAL tuple (grouped-by-the-rest results), but exposing that
-        // correctly needs its own UI treatment (explaining the grouping) and
-        // is left for a follow-up rather than guessed at here.
-        compositeLegValues.every((v) => v.trim() !== '')
+      ? compositeLeadingCount > 0
       : (effectiveMode === 'exact' && lookupValue.trim() !== '') ||
         (effectiveMode === 'range' && lookupFrom.trim() !== '' && lookupTo.trim() !== '') ||
         (effectiveMode === 'prefix' && lookupPrefix.trim() !== ''));
@@ -290,7 +333,10 @@ export function LookupPanel({
       onApply({
         ...base,
         mode: 'multi',
-        values: compositeLegValues.map((v) => v.trim()),
+        // Trimmed to the leading run only — an unfilled trailing leg is
+        // OMITTED (a shorter, partial tuple), never sent as `''` (which
+        // would submit a full-length tuple with empty-string legs instead).
+        values: compositeLegValues.slice(0, compositeLeadingCount).map((v) => v.trim()),
         ...sortBound,
       });
       return;
@@ -349,16 +395,57 @@ export function LookupPanel({
                 <Typography variant="body2" color="text.secondary" sx={{ width: '100%' }}>
                   <FormattedMessage id={`${messagePrefix}.lookupCompositeHint`} />
                 </Typography>
+                {/* A partial tuple is legal (a leading run of the declared
+                    legs) and matches every combination of the fields left
+                    blank, grouped by them — surfaced only once it's actually
+                    the case (the first leg alone doesn't yet say whether the
+                    caller intends to fill in more), and only while it's still
+                    forward guidance: once applied, the host page's own
+                    "grouped by" note already says this about the results on
+                    screen, so repeating it here would just be the same
+                    sentence twice in one view. */}
+                {compositeLeadingCount > 0 &&
+                  compositeLeadingCount < selectedDef.legs.length &&
+                  !composedMatchesApplied && (
+                  <Typography variant="body2" color="text.secondary" sx={{ width: '100%' }}>
+                    <FormattedMessage
+                      id={`${messagePrefix}.lookupCompositePartialHint`}
+                      values={{ fields: selectedDef.legs.slice(compositeLeadingCount).join(', ') }}
+                    />
+                  </Typography>
+                )}
                 {selectedDef.legs.map((leg, i) => (
                   <TextField
                     key={leg}
                     size="small"
                     label={leg}
                     value={compositeLegValues[i]}
+                    // A leg past the current leading run is unreachable — its
+                    // predecessor is blank, so filling it in would leave a
+                    // gap the API never accepts. Disabled rather than hidden,
+                    // so the full declared shape of the composite stays visible.
+                    disabled={i > compositeLeadingCount}
                     onChange={(e) => {
                       const next = [...compositeLegValues];
                       next[i] = e.target.value;
+                      // Blanking a leg invalidates every leg after it (the
+                      // filled set must stay a contiguous leading run) —
+                      // cascade-clear rather than leave stale values sitting
+                      // behind what just became a disabled field.
+                      if (e.target.value.trim() === '') {
+                        for (let j = i + 1; j < next.length; j++) next[j] = '';
+                      }
                       setCompositeValues(next);
+                      // The sort-key window disappears the moment the tuple
+                      // stops being fully specified (`showSortWindow` above) —
+                      // clear its inputs along with it. Otherwise a value
+                      // typed while full survives hidden through a full→
+                      // partial edit and reappears, stale, if the tuple is
+                      // filled back in later without ever touching Clear.
+                      if (next.some((v) => v.trim() === '')) {
+                        setSortFrom('');
+                        setSortTo('');
+                      }
                     }}
                     sx={{ minWidth: 150 }}
                   />

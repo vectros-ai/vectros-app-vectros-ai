@@ -18,9 +18,8 @@
 // ---------------------------------------------------------------------------
 
 import type { SchemaResponse, Vectros } from '../api/vectrosApi';
-import type { RenderHints } from './recordForm';
-import { schemasForSurface } from './schemaSurfaces';
-import type { TypedSchema } from './schemaSurfaces';
+import { schemasForSurface } from '@vectros-ai/react';
+import type { RenderHints, TypedSchema } from '@vectros-ai/react';
 
 type FieldDef = Vectros.FieldDef;
 
@@ -32,7 +31,7 @@ export type DocumentTypeSchema = TypedSchema;
  * `allowedSurfaces` includes `document`. These are the selectable types for
  * the by-type document view. Declared order is preserved.
  * (The records explorer applies the same filter for the `record` surface —
- * see lib/schemaSurfaces.ts.)
+ * see @vectros-ai/react's schema-ui/schemaSurfaces.ts.)
  */
 export function documentSurfaceSchemas(
   schemas: ReadonlyArray<SchemaResponse>,

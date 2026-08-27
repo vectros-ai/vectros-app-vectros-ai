@@ -20,7 +20,14 @@ import DeleteOutline from '@mui/icons-material/DeleteOutline';
 import EditOutlined from '@mui/icons-material/EditOutlined';
 import UnarchiveOutlined from '@mui/icons-material/UnarchiveOutlined';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
-import { ConfirmDialog, LoadingBlock, MetaList, MetaRow } from '@vectros-ai/react';
+import {
+  ConfirmDialog,
+  LoadingBlock,
+  MetaList,
+  MetaRow,
+  findDisplayFieldId,
+  formatCellValue,
+} from '@vectros-ai/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
@@ -28,7 +35,6 @@ import { vectrosApiClient } from '../../api/vectrosApi';
 import type { Vectros } from '../../api/vectrosApi';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { indexStatusLabel, recordStatusLabel } from '../../lib/recordLabels';
-import { findDisplayFieldId, formatCellValue } from '../../lib/recordColumns';
 import { deriveReferenceFields, referenceValues } from '../../lib/recordReferences';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { ReferenceLink } from '../../components/ReferenceLink';

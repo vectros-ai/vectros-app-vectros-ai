@@ -519,6 +519,44 @@ describe('RecordsPage', () => {
     expect(call.value).toBeUndefined();
   });
 
+  it('runs a PARTIAL composite tuple — sends only the leading run, shows the grouped-by note, and drops column sorting', async () => {
+    const user = userEvent.setup();
+    const lookupSpy = vi.fn().mockResolvedValue(
+      pageOf([
+        { id: 'rec_g1', typeName: 'ticket', status: 'ACTIVE', payload: { status: 'open', area: 'billing' } },
+        { id: 'rec_g2', typeName: 'ticket', status: 'ACTIVE', payload: { status: 'open', area: 'support' } },
+      ]),
+    );
+    stub({
+      listSchemas: vi.fn().mockResolvedValue(pageOf([SCHEMA_WITH_COMPOSITE_LOOKUP])),
+      listRecords: vi.fn().mockResolvedValue(pageOf([])),
+      lookupRecordsByBody: lookupSpy,
+    });
+    renderPage();
+
+    await screen.findByRole('combobox', { name: 'Look up by' });
+    await user.click(screen.getByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: 'status,area' }));
+    // Only the leading leg — a legal partial tuple, grouped by `area`.
+    await user.type(screen.getByRole('textbox', { name: 'status' }), 'open');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+
+    await screen.findByRole('link', { name: 'rec_g1' });
+    expect(lookupSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'ticket', field: 'status,area', values: ['open'], order: 'asc' }),
+    );
+
+    // Grouped-by note names the field left blank. LookupPanel renders its
+    // own partial-tuple hint too ("Matching every record with these values,
+    // grouped by: area") — matched by the same substring, so assert on the
+    // page-level note's distinguishing wording instead of the shared one.
+    expect(await screen.findByText(/These results are grouped by: area/i)).toBeInTheDocument();
+
+    // Column sort is unavailable while the result is grouped — the "area"
+    // column header renders as plain text, not an interactive sort control.
+    expect(screen.queryByRole('button', { name: /area/i })).not.toBeInTheDocument();
+  });
+
   it('narrows an exact lookup by the sort-key window (sortFrom/sortTo)', async () => {
     const user = userEvent.setup();
     const lookupSpy = vi.fn().mockResolvedValue(

@@ -45,7 +45,16 @@ import {
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
-import { SubmitButton } from '@vectros-ai/react';
+import {
+  RecordFormFields,
+  SubmitButton,
+  coerceFieldValue,
+  distinctTypes,
+  isReservedPayloadKey,
+  schemasForSurface,
+  validateFields,
+  withField,
+} from '@vectros-ai/react';
 import { FormattedMessage, useIntl } from 'react-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
@@ -55,16 +64,8 @@ import type { FolderResponse } from '../api/vectrosApi';
 import { dataQueryKeys } from '../lib/dataQueryKeys';
 import { formatBytes } from '../lib/formatBytes';
 import { listAllSchemas } from '../lib/listAllSchemas';
-import { distinctTypes, schemasForSurface } from '../lib/schemaSurfaces';
-import {
-  coerceFieldValue,
-  isReservedPayloadKey,
-  validateFields,
-  withField,
-} from '../lib/recordForm';
 import { MAX_UPLOAD_BYTES } from '../lib/uploadLimits';
 import { ApiErrorAlert } from './ApiErrorAlert';
-import { RecordFormFields } from './RecordFormFields';
 import { folderMenuItems } from './folderMenuItems';
 import { OwnershipScopeField } from './OwnershipScopeField';
 import type { OwnershipScopeSelection } from './OwnershipScopeField';

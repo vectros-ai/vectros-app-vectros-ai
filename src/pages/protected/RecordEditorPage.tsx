@@ -46,26 +46,28 @@ import {
 import type { SelectChangeEvent } from '@mui/material';
 import ArrowBack from '@mui/icons-material/ArrowBack';
 import { FormattedMessage, useIntl } from 'react-intl';
-import { LoadingBlock, SubmitButton } from '@vectros-ai/react';
+import {
+  LoadingBlock,
+  RecordFormFields,
+  SubmitButton,
+  coerceFieldValue,
+  distinctTypes,
+  isFormEditable,
+  isReservedPayloadKey,
+  schemasForSurface,
+  stripReservedPayloadKeys,
+  validateFields,
+  withField,
+} from '@vectros-ai/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
 import type { RecordResponse, SchemaResponse, Vectros } from '../../api/vectrosApi';
 import { listAllSchemas } from '../../lib/listAllSchemas';
-import { distinctTypes, schemasForSurface } from '../../lib/schemaSurfaces';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { formatRecordPayload, isVersionConflict, parseRecordPayload } from '../../lib/recordEditor';
 import { extractErrorMessage } from '../../lib/apiError';
-import {
-  coerceFieldValue,
-  isFormEditable,
-  isReservedPayloadKey,
-  stripReservedPayloadKeys,
-  validateFields,
-  withField,
-} from '../../lib/recordForm';
-import { RecordFormFields } from '../../components/RecordFormFields';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { OwnershipScopeField } from '../../components/OwnershipScopeField';
 import type { OwnershipScopeSelection } from '../../components/OwnershipScopeField';

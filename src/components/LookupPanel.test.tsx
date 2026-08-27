@@ -49,6 +49,10 @@ function renderPanel(
 // API refuses `rangeEnabled` on one at declare time, so `rangeEnabled` is
 // always false here; there is no rangeEnabled composite shape to construct.
 const COMPOSITE: LookupFieldDef = { fieldNames: ['status', 'area'], rangeEnabled: false };
+// A three-leg composite — needed to tell "the very next leg is reachable"
+// apart from "every remaining leg is disabled", which a two-leg def can't
+// distinguish (there's only one leg left to check either way).
+const COMPOSITE3: LookupFieldDef = { fieldNames: ['status', 'area', 'owner'], rangeEnabled: false };
 const PLAIN: LookupFieldDef = { fieldName: 'owner', rangeEnabled: false };
 const PLAIN_RANGE: LookupFieldDef = { fieldName: 'code', rangeEnabled: true };
 // sortBy omitted (undefined) defaults to `createdAt` server-side — known
@@ -80,7 +84,7 @@ describe('LookupPanel — composite lookup fields', () => {
     expect(screen.queryByRole('textbox', { name: 'Value' })).not.toBeInTheDocument();
   });
 
-  it('disables Look up until every leg has a value', async () => {
+  it('disables Look up until the FIRST leg has a value, then allows a partial (leading-run) submission', async () => {
     const user = userEvent.setup();
     renderPanel([COMPOSITE], vi.fn());
 
@@ -90,11 +94,46 @@ describe('LookupPanel — composite lookup fields', () => {
     const applyButton = screen.getByRole('button', { name: 'Look up' });
     expect(applyButton).toBeDisabled();
 
+    // One of two legs filled is enough — the API accepts a leading-run
+    // PARTIAL tuple, grouped by the leg(s) left blank.
     await user.type(screen.getByRole('textbox', { name: 'status' }), 'open');
-    expect(applyButton).toBeDisabled(); // one of two legs filled — still not ready
+    expect(applyButton).toBeEnabled();
 
     await user.type(screen.getByRole('textbox', { name: 'area' }), 'billing');
     expect(applyButton).toBeEnabled();
+  });
+
+  it('disables a leg until its predecessor has a value, and cascade-clears every leg after one just blanked', async () => {
+    const user = userEvent.setup();
+    renderPanel([COMPOSITE3], vi.fn());
+
+    await user.click(screen.getByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: 'status,area,owner' }));
+
+    const status = screen.getByRole('textbox', { name: 'status' });
+    const area = screen.getByRole('textbox', { name: 'area' });
+    const owner = screen.getByRole('textbox', { name: 'owner' });
+    // Only the very first leg is reachable until it has a value.
+    expect(status).toBeEnabled();
+    expect(area).toBeDisabled();
+    expect(owner).toBeDisabled();
+
+    await user.type(status, 'open');
+    expect(area).toBeEnabled(); // the next leg in the run becomes reachable
+    expect(owner).toBeDisabled(); // still unreachable — area is still blank
+
+    await user.type(area, 'billing');
+    expect(owner).toBeEnabled();
+    await user.type(owner, 'acme');
+
+    // Blanking the first leg must invalidate (and disable) every leg after
+    // it — a filled `area`/`owner` behind a blank `status` would be a gap
+    // the API never accepts.
+    await user.clear(status);
+    expect(area).toHaveValue('');
+    expect(area).toBeDisabled();
+    expect(owner).toHaveValue('');
+    expect(owner).toBeDisabled();
   });
 
   it('submits field + values (one per leg, declared order) — never a single value', async () => {
@@ -114,6 +153,84 @@ describe('LookupPanel — composite lookup fields', () => {
       mode: 'multi',
       values: ['open', 'billing'],
     });
+  });
+
+  it('submits a PARTIAL tuple as just the leading run — never padded with empty trailing legs', async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn();
+    renderPanel([COMPOSITE3], onApply);
+
+    await user.click(screen.getByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: 'status,area,owner' }));
+    await user.type(screen.getByRole('textbox', { name: 'status' }), 'open');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+
+    expect(onApply).toHaveBeenCalledWith({
+      field: 'status,area,owner',
+      order: 'asc',
+      mode: 'multi',
+      values: ['open'], // NOT ['open', '', '']
+    });
+  });
+
+  it('shows the partial-tuple grouping hint once a leg is filled but the tuple is not yet complete', async () => {
+    const user = userEvent.setup();
+    renderPanel([COMPOSITE], vi.fn());
+
+    // The static composite hint (always shown) also mentions grouping in the
+    // abstract, so match the PARTIAL hint's own distinguishing text (the
+    // field list it names) rather than the word "grouped" alone.
+    await user.click(screen.getByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: 'status,area' }));
+    expect(screen.queryByText(/grouped by: area/i)).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole('textbox', { name: 'status' }), 'open');
+    expect(await screen.findByText(/grouped by: area/i)).toBeInTheDocument();
+
+    // A fully-specified tuple narrows to an exact match — no grouping, so
+    // the hint goes away again.
+    await user.type(screen.getByRole('textbox', { name: 'area' }), 'billing');
+    expect(screen.queryByText(/grouped by: area/i)).not.toBeInTheDocument();
+  });
+
+  it('hides the partial-tuple hint once Applied — the host page already says it about the results on screen — and brings it back (then re-submits) once the legs are edited again', async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn();
+    renderPanel([COMPOSITE], onApply);
+
+    await user.click(screen.getByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: 'status,area' }));
+    await user.type(screen.getByRole('textbox', { name: 'status' }), 'open');
+    expect(await screen.findByText(/grouped by: area/i)).toBeInTheDocument();
+
+    // Submitting the partial tuple as-is: the panel's own hint would just be
+    // repeating what the host page's "grouped by" note (rendered elsewhere,
+    // not by this component) already says about the results now on screen.
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    expect(onApply).toHaveBeenNthCalledWith(1, {
+      field: 'status,area',
+      order: 'asc',
+      mode: 'multi',
+      values: ['open'],
+    });
+    expect(screen.queryByText(/grouped by: area/i)).not.toBeInTheDocument();
+
+    // Editing the legs again — composing a NEW, not-yet-submitted lookup —
+    // brings the forward guidance back, even though something is still
+    // "applied" (the stale, previously-submitted one)...
+    await user.type(screen.getByRole('textbox', { name: 'status' }), '2');
+    expect(await screen.findByText(/grouped by: area/i)).toBeInTheDocument();
+
+    // ...and re-Apply genuinely re-submits the edited tuple, not a no-op —
+    // the panel's input state was never reset by the first Apply.
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    expect(onApply).toHaveBeenNthCalledWith(2, {
+      field: 'status,area',
+      order: 'asc',
+      mode: 'multi',
+      values: ['open2'],
+    });
+    expect(screen.queryByText(/grouped by: area/i)).not.toBeInTheDocument();
   });
 
   it('clears per-leg values when switching away from a composite, and vice versa', async () => {
@@ -250,6 +367,32 @@ describe('LookupPanel — sortFrom/sortTo (sort-key window)', () => {
 
     await user.type(screen.getByRole('textbox', { name: 'area' }), 'billing');
     expect(await screen.findByRole('textbox', { name: 'Sort from' })).toBeInTheDocument();
+  });
+
+  it('clears the sort window when a full composite tuple is edited back to partial — never resubmits a stale bound once refilled', async () => {
+    const user = userEvent.setup();
+    const onApply = vi.fn();
+    renderPanel([COMPOSITE], onApply, { supportsSortWindow: true });
+
+    await user.click(screen.getByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: 'status,area' }));
+    await user.type(screen.getByRole('textbox', { name: 'status' }), 'open');
+    await user.type(screen.getByRole('textbox', { name: 'area' }), 'billing');
+    await user.type(await screen.findByRole('textbox', { name: 'Sort from' }), '1700000000000');
+
+    // Blanking a leg hides the window (full-tuple-only) — clearing the leg
+    // must also clear the bound sitting behind it, not just hide it.
+    await user.clear(screen.getByRole('textbox', { name: 'area' }));
+    expect(screen.queryByRole('textbox', { name: 'Sort from' })).not.toBeInTheDocument();
+
+    // Refilling the tuple back to full brings the window back — EMPTY, not
+    // carrying the value typed before the edit.
+    await user.type(screen.getByRole('textbox', { name: 'area' }), 'support');
+    expect(await screen.findByRole('textbox', { name: 'Sort from' })).toHaveValue('');
+
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    const applied = onApply.mock.calls[0]![0] as Record<string, unknown>;
+    expect('sortFrom' in applied).toBe(false);
   });
 
   it('submits only the bound(s) actually given — never an empty sortTo', async () => {

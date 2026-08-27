@@ -62,7 +62,17 @@ import EditOutlined from '@mui/icons-material/EditOutlined';
 import QuestionAnswerOutlined from '@mui/icons-material/QuestionAnswerOutlined';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
-import { ConfirmDialog, LoadingBlock } from '@vectros-ai/react';
+import {
+  ConfirmDialog,
+  LoadingBlock,
+  deriveValueColumns,
+  distinctTypes,
+  filterableFieldIds,
+  formatCellValue,
+  payloadMatchesQuery,
+  sortRecords,
+} from '@vectros-ai/react';
+import type { SortDirection } from '@vectros-ai/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
@@ -72,15 +82,6 @@ import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { drainPages } from '../../lib/drainPages';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { documentSurfaceSchemas, typeNameBySchemaId } from '../../lib/documentTypes';
-import { distinctTypes } from '../../lib/schemaSurfaces';
-import {
-  deriveValueColumns,
-  filterableFieldIds,
-  formatCellValue,
-  payloadMatchesQuery,
-  sortRecords,
-} from '../../lib/recordColumns';
-import type { SortDirection } from '../../lib/recordColumns';
 import { orderFoldersAsTree } from '../../lib/folderTree';
 import {
   documentIndexStatusColor,

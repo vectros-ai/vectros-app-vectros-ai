@@ -44,26 +44,27 @@ import {
 import type { SelectChangeEvent } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
-import { LoadingBlock } from '@vectros-ai/react';
+import {
+  LoadingBlock,
+  deriveValueColumns,
+  distinctTypes,
+  fieldLabel,
+  filterableFieldIds,
+  findDisplayFieldId,
+  formatCellValue,
+  payloadMatchesQuery,
+  schemasForSurface,
+  sortRecords,
+} from '@vectros-ai/react';
+import type { SortDirection } from '@vectros-ai/react';
 import { useQuery } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
 import type { RecordResponse } from '../../api/vectrosApi';
-import { distinctTypes, schemasForSurface } from '../../lib/schemaSurfaces';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { indexStatusColor, indexStatusLabel, recordStatusLabel } from '../../lib/recordLabels';
-import {
-  deriveValueColumns,
-  filterableFieldIds,
-  findDisplayFieldId,
-  formatCellValue,
-  payloadMatchesQuery,
-  sortRecords,
-} from '../../lib/recordColumns';
-import type { SortDirection } from '../../lib/recordColumns';
-import { fieldLabel } from '../../lib/recordForm';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { IndexStatusChip } from '../../components/IndexStatusChip';
 import { appliedLookupModeArgs, LookupPanel } from '../../components/LookupPanel';
@@ -80,6 +81,24 @@ const UPDATED_SORT_KEY = '__updatedAt__';
 /** A record's payload as a plain bag (the SDK types it loosely). */
 function payloadOf(record: RecordResponse): Record<string, unknown> | undefined {
   return record.payload as Record<string, unknown> | undefined;
+}
+
+/**
+ * The composite legs an applied lookup left unspecified — the fields its
+ * result set is GROUPED by, per adjacency in the server's response — or
+ * `null` when the applied lookup isn't a partial composite tuple at all
+ * (plain list, a single-field lookup, or a composite given every leg, which
+ * narrows to an exact match same as any other lookup). `field` on a
+ * composite is always the full declared tuple joined by `,` (`lookupFieldLabel`
+ * on the panel side), so comparing its split length against `values.length`
+ * recovers "how many legs were left blank" without re-deriving it from the
+ * schema's own `lookupFields`.
+ */
+function partialCompositeGroupFields(applied: AppliedLookup | null): readonly string[] | null {
+  if (applied === null || applied.mode !== 'multi') return null;
+  const declaredLegs = applied.field.split(',');
+  if (applied.values.length >= declaredLegs.length) return null;
+  return declaredLegs.slice(applied.values.length);
 }
 
 export function RecordsPage(): React.JSX.Element {
@@ -101,6 +120,16 @@ export function RecordsPage(): React.JSX.Element {
   // live inside LookupPanel; it delivers a lookup here only on submit, so the
   // query refetches only when the user runs the lookup.
   const [appliedLookup, setAppliedLookup] = useState<AppliedLookup | null>(null);
+  // A partial composite tuple's result is grouped by adjacency in the
+  // server's response (see the module doc on `partialCompositeGroupFields`) —
+  // a client-side column sort would silently scramble that grouping, so
+  // applying (or clearing) a lookup also drops any active client sort, and
+  // the sort controls stay disabled for as long as this reads non-null.
+  const groupedByFields = partialCompositeGroupFields(appliedLookup);
+  const applyLookup = (lookup: AppliedLookup | null): void => {
+    setAppliedLookup(lookup);
+    setSort(null);
+  };
 
   const schemasQuery = useQuery({
     queryKey: dataQueryKeys.schemas(tenant, context),
@@ -239,22 +268,33 @@ export function RecordsPage(): React.JSX.Element {
     );
   };
 
-  /** A sortable column header cell. Keyed — callers render these from maps. */
+  /**
+   * A sortable column header cell. Keyed — callers render these from maps.
+   * Falls back to a plain (unsortable) header while `groupedByFields` is
+   * active: the server's grouping is expressed purely as row adjacency, and
+   * any client-side column sort would silently flatten it back into one
+   * undifferentiated order.
+   */
   const sortableHeader = (
     key: string,
     label: React.ReactNode,
     align?: 'right',
-  ): React.JSX.Element => (
-    <TableCell key={key} align={align} sortDirection={sort?.key === key ? sort.direction : false}>
-      <TableSortLabel
-        active={sort?.key === key}
-        direction={sort?.key === key ? sort.direction : 'asc'}
-        onClick={() => toggleSort(key)}
-      >
+  ): React.JSX.Element =>
+    groupedByFields ? (
+      <TableCell key={key} align={align}>
         {label}
-      </TableSortLabel>
-    </TableCell>
-  );
+      </TableCell>
+    ) : (
+      <TableCell key={key} align={align} sortDirection={sort?.key === key ? sort.direction : false}>
+        <TableSortLabel
+          active={sort?.key === key}
+          direction={sort?.key === key ? sort.direction : 'asc'}
+          onClick={() => toggleSort(key)}
+        >
+          {label}
+        </TableSortLabel>
+      </TableCell>
+    );
 
   const showFilter = filterFieldIds.length > 0;
   const filteredToEmpty = records.length > 0 && displayedRecords.length === 0;
@@ -355,20 +395,31 @@ export function RecordsPage(): React.JSX.Element {
           {/* Server-side lookup — only when the active schema declares lookup
               fields. Exact match always; range (from/to) + prefix on
               range-enabled fields; a composite (declared over more than one
-              field) matches on all of them at once; `order` sets the
-              server's sort direction; an exact/composite match can also be
-              narrowed by the sort key's own range (`supportsSortWindow` —
-              records' lookup accepts it, documents' doesn't). Keyed on the
-              type so its inputs reset when the type changes. */}
+              field) matches on every declared leg, or a leading run of them
+              (grouped by the legs left blank — the note below); `order` sets
+              the server's sort direction; a FULLY-specified exact/composite
+              match can also be narrowed by the sort key's own range
+              (`supportsSortWindow` — records' lookup accepts it, documents'
+              doesn't). Keyed on the type so its inputs reset when the type
+              changes. */}
           <LookupPanel
             key={effectiveType ?? ''}
             defs={lookupDefs}
             applied={appliedLookup}
-            onApply={setAppliedLookup}
+            onApply={applyLookup}
             messagePrefix="records"
             idPrefix="records-lookup"
             supportsSortWindow
           />
+
+          {groupedByFields && (
+            <Alert severity="info">
+              <FormattedMessage
+                id="records.groupedByNote"
+                values={{ fields: groupedByFields.join(', ') }}
+              />
+            </Alert>
+          )}
 
           {recordsQuery.isPending ? (
             <LoadingBlock label={intl.formatMessage({ id: 'records.loadingRecords' })} />

@@ -46,7 +46,7 @@ import {
 import type { SelectChangeEvent } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
-import { LoadingBlock } from '@vectros-ai/react';
+import { LoadingBlock, distinctTypes } from '@vectros-ai/react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
@@ -54,7 +54,6 @@ import { vectrosApiClient } from '../../api/vectrosApi';
 import type { FolderResponse, SchemaResponse, SearchResultItem } from '../../api/vectrosApi';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { drainPages } from '../../lib/drainPages';
-import { distinctTypes } from '../../lib/schemaSurfaces';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { folderMenuItems } from '../../components/folderMenuItems';
 import { ApiErrorAlert } from '../../components/ApiErrorAlert';

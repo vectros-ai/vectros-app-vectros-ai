@@ -10,7 +10,7 @@ import {
   deriveReferenceFields,
   referenceValues,
 } from './recordReferences';
-import type { RenderHints } from './recordForm';
+import type { RenderHints } from '@vectros-ai/react';
 import type { Vectros } from '../api/vectrosApi';
 
 type FieldDef = Vectros.FieldDef;
