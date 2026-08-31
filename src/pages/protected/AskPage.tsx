@@ -40,6 +40,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import StopIcon from '@mui/icons-material/Stop';
 import { FormattedMessage, useIntl } from 'react-intl';
 import { useQuery } from '@tanstack/react-query';
+import { ApiErrorAlert, useInferenceStream } from '@vectros-ai/react';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
@@ -50,9 +51,7 @@ import { folderMenuItems } from '../../components/folderMenuItems';
 import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
 import { ModelPicker } from '../../components/ModelPicker';
 import { InferenceErrorAlert } from '../../components/InferenceErrorAlert';
-import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { useInferenceModels } from '../../hooks/useInferenceModels';
-import { useInferenceStream } from '../../hooks/useInferenceStream';
 
 /** Folder-filter sentinel meaning "the whole context" (no folder scope). */
 const ALL_FOLDERS = 'ALL';

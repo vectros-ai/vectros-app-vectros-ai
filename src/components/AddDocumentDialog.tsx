@@ -46,6 +46,7 @@ import {
 import type { SelectChangeEvent } from '@mui/material';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import {
+  ApiErrorAlert,
   RecordFormFields,
   SubmitButton,
   coerceFieldValue,
@@ -65,7 +66,6 @@ import { dataQueryKeys } from '../lib/dataQueryKeys';
 import { formatBytes } from '../lib/formatBytes';
 import { listAllSchemas } from '../lib/listAllSchemas';
 import { MAX_UPLOAD_BYTES } from '../lib/uploadLimits';
-import { ApiErrorAlert } from './ApiErrorAlert';
 import { folderMenuItems } from './folderMenuItems';
 import { OwnershipScopeField } from './OwnershipScopeField';
 import type { OwnershipScopeSelection } from './OwnershipScopeField';

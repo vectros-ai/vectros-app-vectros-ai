@@ -45,6 +45,7 @@ import type { SelectChangeEvent } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
 import {
+  ApiErrorAlert,
   LoadingBlock,
   deriveValueColumns,
   distinctTypes,
@@ -65,7 +66,6 @@ import type { RecordResponse } from '../../api/vectrosApi';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { indexStatusColor, indexStatusLabel, recordStatusLabel } from '../../lib/recordLabels';
-import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { IndexStatusChip } from '../../components/IndexStatusChip';
 import { appliedLookupModeArgs, LookupPanel } from '../../components/LookupPanel';
 import type { AppliedLookup, LookupFieldDef } from '../../components/LookupPanel';

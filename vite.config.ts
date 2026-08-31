@@ -92,9 +92,6 @@ export default defineConfig({
       // first or it's shadowed by the shorter one matching as a prefix.
       // This app only ever constructs CognitoAuthProvider; the auth0 subpath
       // has no alias here since nothing in this app imports it.
-      '@vectros-ai/react/providers/cognito': fileURLToPath(
-        new URL('../../packages/react/dist/auth/providers/cognito.mjs', import.meta.url),
-      ),
     },
     // The lib declares these as peer deps; with a built-dist alias the app and the
     // lib's externalized imports must resolve to ONE copy. Two copies break two

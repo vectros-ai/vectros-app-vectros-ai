@@ -25,6 +25,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import SendIcon from '@mui/icons-material/Send';
 import StopIcon from '@mui/icons-material/Stop';
 import { FormattedMessage, useIntl } from 'react-intl';
+import { useInferenceStream } from '@vectros-ai/react';
 
 import { useActiveContextId, useActiveTenantId } from '../auth';
 import { vectrosApiClient } from '../api/vectrosApi';
@@ -32,7 +33,6 @@ import type { Vectros } from '../api/vectrosApi';
 import { ModelPicker } from './ModelPicker';
 import { InferenceErrorAlert } from './InferenceErrorAlert';
 import { useInferenceModels } from '../hooks/useInferenceModels';
-import { useInferenceStream } from '../hooks/useInferenceStream';
 
 interface DocumentAskDrawerProps {
   readonly open: boolean;

@@ -44,10 +44,12 @@ import UnarchiveOutlined from '@mui/icons-material/UnarchiveOutlined';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
 import {
+  ApiErrorAlert,
   ConfirmDialog,
   LoadingBlock,
   MetaList,
   MetaRow,
+  RequestIdCaption,
   fieldLabel,
   formatCellValue,
 } from '@vectros-ai/react';
@@ -74,8 +76,6 @@ import {
 import { MarkdownView } from '../../components/MarkdownView';
 import { DocumentEditDialog } from '../../components/DocumentEditDialog';
 import { DocumentAskDrawer } from '../../components/DocumentAskDrawer';
-import { ApiErrorAlert } from '../../components/ApiErrorAlert';
-import { RequestIdCaption } from '../../components/RequestIdCaption';
 import { VersionHistory } from '../../components/VersionHistory';
 import { OwnershipScopeChips } from '../../components/OwnershipScopeChips';
 import { IndexFailureAlert } from '../../components/IndexFailureAlert';

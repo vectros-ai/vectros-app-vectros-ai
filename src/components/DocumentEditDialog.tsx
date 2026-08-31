@@ -35,10 +35,12 @@ import {
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
 import {
+  ApiErrorAlert,
   RecordFormFields,
   SubmitButton,
   coerceFieldValue,
   isReservedPayloadKey,
+  isVersionConflict,
   stripReservedPayloadKeys,
   validateFields,
   withField,
@@ -50,8 +52,6 @@ import { useActiveContextId, useActiveTenantId } from '../auth';
 import { vectrosApiClient } from '../api/vectrosApi';
 import type { DocumentResponse, FolderResponse, SchemaResponse } from '../api/vectrosApi';
 import { dataQueryKeys } from '../lib/dataQueryKeys';
-import { isVersionConflict } from '../lib/apiError';
-import { ApiErrorAlert } from './ApiErrorAlert';
 import { folderMenuItems } from './folderMenuItems';
 
 const KEEP_FOLDER = '';

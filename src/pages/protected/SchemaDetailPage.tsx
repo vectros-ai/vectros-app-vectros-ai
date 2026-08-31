@@ -29,14 +29,13 @@ import {
 } from '@mui/material';
 import ArrowBack from '@mui/icons-material/ArrowBack';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
-import { LoadingBlock, MetaList, MetaRow } from '@vectros-ai/react';
+import { ApiErrorAlert, LoadingBlock, MetaList, MetaRow } from '@vectros-ai/react';
 import { useQuery } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { lookupFieldLabel } from '../../lib/lookupFieldLabel';
-import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 
 /** A small ✓/— cell for a boolean field attribute. */
 function BoolCell({ on }: { readonly on: boolean | undefined }): React.JSX.Element {

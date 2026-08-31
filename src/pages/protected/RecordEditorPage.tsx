@@ -47,11 +47,13 @@ import type { SelectChangeEvent } from '@mui/material';
 import ArrowBack from '@mui/icons-material/ArrowBack';
 import { FormattedMessage, useIntl } from 'react-intl';
 import {
+  ApiErrorAlert,
   LoadingBlock,
   RecordFormFields,
   SubmitButton,
   coerceFieldValue,
   distinctTypes,
+  extractErrorMessage,
   isFormEditable,
   isReservedPayloadKey,
   schemasForSurface,
@@ -67,8 +69,6 @@ import type { RecordResponse, SchemaResponse, Vectros } from '../../api/vectrosA
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { formatRecordPayload, isVersionConflict, parseRecordPayload } from '../../lib/recordEditor';
-import { extractErrorMessage } from '../../lib/apiError';
-import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { OwnershipScopeField } from '../../components/OwnershipScopeField';
 import type { OwnershipScopeSelection } from '../../components/OwnershipScopeField';
 

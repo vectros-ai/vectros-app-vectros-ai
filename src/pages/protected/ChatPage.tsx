@@ -25,6 +25,7 @@ import {
 import SendIcon from '@mui/icons-material/Send';
 import StopIcon from '@mui/icons-material/Stop';
 import { FormattedMessage, useIntl } from 'react-intl';
+import { useInferenceStream } from '@vectros-ai/react';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
@@ -32,7 +33,6 @@ import type { Vectros } from '../../api/vectrosApi';
 import { ModelPicker } from '../../components/ModelPicker';
 import { InferenceErrorAlert } from '../../components/InferenceErrorAlert';
 import { useInferenceModels } from '../../hooks/useInferenceModels';
-import { useInferenceStream } from '../../hooks/useInferenceStream';
 
 interface ChatTurn {
   readonly role: 'user' | 'assistant';

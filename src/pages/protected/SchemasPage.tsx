@@ -28,14 +28,13 @@ import {
   Typography,
 } from '@mui/material';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
-import { LoadingBlock } from '@vectros-ai/react';
+import { ApiErrorAlert, LoadingBlock } from '@vectros-ai/react';
 import { useQuery } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import type { SchemaResponse } from '../../api/vectrosApi';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
-import { ApiErrorAlert } from '../../components/ApiErrorAlert';
 import { PageHeader } from '../../components/PageHeader';
 
 /** Count of field definitions on a schema (0 when none declared). */

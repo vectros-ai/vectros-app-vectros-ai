@@ -63,14 +63,17 @@ import QuestionAnswerOutlined from '@mui/icons-material/QuestionAnswerOutlined';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
 import {
+  ApiErrorAlert,
   ConfirmDialog,
   LoadingBlock,
+  RequestIdCaption,
   deriveValueColumns,
   distinctTypes,
   filterableFieldIds,
   formatCellValue,
   payloadMatchesQuery,
   sortRecords,
+  statusCodeOf,
 } from '@vectros-ai/react';
 import type { SortDirection } from '@vectros-ai/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -98,10 +101,7 @@ import type { AppliedLookup, LookupFieldDef } from '../../components/LookupPanel
 import { AddDocumentDialog } from '../../components/AddDocumentDialog';
 import { RefreshButton } from '../../components/RefreshButton';
 import { DocumentAskDrawer } from '../../components/DocumentAskDrawer';
-import { ApiErrorAlert } from '../../components/ApiErrorAlert';
-import { RequestIdCaption } from '../../components/RequestIdCaption';
 import { folderMenuItems } from '../../components/folderMenuItems';
-import { statusCodeOf } from '../../lib/apiError';
 
 /** Page size for the drained list endpoints — the API's max (default is 20). */
 const PAGE_SIZE = 100;

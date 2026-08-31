@@ -11,8 +11,7 @@
 
 import type { ReactNode } from 'react';
 import { Alert, Typography } from '@mui/material';
-
-import type { InferenceStreamState } from '../lib/inferenceStream';
+import type { InferenceStreamState } from '@vectros-ai/react';
 
 export interface InferenceErrorAlertProps {
   /** The terminal error from the stream state (its `message` is shown as detail). */

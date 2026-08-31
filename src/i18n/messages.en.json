@@ -234,7 +234,6 @@
   "documents.title": "Documents",
   "documents.typeLabel": "Document type",
   "documents.untitled": "Untitled document",
-  "error.requestId": "Reference ID: {requestId}",
   "folderEditor.cancel": "Cancel",
   "folderEditor.create": "Create folder",
   "folderEditor.createTitle": "New folder",

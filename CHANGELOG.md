@@ -3,6 +3,36 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.18.0 — 2026-08-28
+
+### Changed
+
+- Bundled `@vectros-ai/sdk` refreshed to the current release's staging build.
+- **`ApiErrorAlert`/`RequestIdCaption` and the API-error extraction helpers
+  (`extractErrorMessage`/`extractRequestId`/`statusCodeOf`/`isVersionConflict`) now come from
+  `@vectros-ai/react`**, not a local copy — these were byte-identical (comment-only diffs) across
+  this app, `admin-app`, and `casework-spa`, so they've been promoted to the shared package
+  (`@vectros-ai/react` 0.10.0), continuing this app's own established pattern of consuming the
+  shared inference/schema-UI modules rather than keeping local duplicates. No behavior change;
+  every call site now imports from `@vectros-ai/react`, `lib/recordEditor.ts`'s `isVersionConflict`
+  re-export now points at the package instead of the deleted local `lib/apiError.ts`, and this
+  app's own `error.requestId` message catalog entry was removed in favor of the package's base
+  catalog entry.
+
+## 0.17.0 — 2026-08-27
+
+### Changed
+
+- **`ChatPage`/`AskPage`/`DocumentAskDrawer`/`InferenceErrorAlert` now consume `useInferenceStream`/
+  `reduceInferenceEvent`/`InferenceStreamState` from `@vectros-ai/react`** instead of this app's own
+  local `hooks/useInferenceStream.ts`/`lib/inferenceStream.ts`, which are deleted. Those files were
+  promoted (copied) into the shared package's own `inference` module and exported from its barrel,
+  but this app was never switched over to consume the shared copy — it kept a near-byte-identical
+  local duplicate (only the `Vectros` type import path differed: `../api/vectrosApi` vs
+  `@vectros-ai/sdk`, both re-exporting the same SDK type). No behavior change — same reducer, same
+  hook, same cancellation/stale-run-guard semantics; verified with the full test suite (450/450
+  green) after the switch.
+
 ## 0.16.0 — 2026-08-27
 
 ### Added

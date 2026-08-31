@@ -3,12 +3,13 @@
 // imports) so they're unit-testable in isolation and reused by both the
 // raw-JSON editor and the schema-driven form view.
 //
-// Optimistic-concurrency detection now lives in the generic `apiError` module
-// (it applies to documents too) and is re-exported here for the record editor's
-// existing call sites.
+// Optimistic-concurrency detection now lives in the shared `@vectros-ai/react`
+// apiError helpers (it applies to documents too, and is byte-identical across
+// every app that had its own copy) and is re-exported here for the record
+// editor's existing call sites.
 // ---------------------------------------------------------------------------
 
-export { isVersionConflict } from './apiError';
+export { isVersionConflict } from '@vectros-ai/react';
 
 /**
  * Result of parsing the raw-JSON payload editor. On failure the `kind`

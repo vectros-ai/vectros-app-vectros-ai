@@ -26,7 +26,7 @@ import {
   TextField,
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
-import { SubmitButton } from '@vectros-ai/react';
+import { ApiErrorAlert, SubmitButton } from '@vectros-ai/react';
 import { FormattedMessage, useIntl } from 'react-intl';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
@@ -34,7 +34,6 @@ import { useActiveContextId, useActiveTenantId } from '../auth';
 import { vectrosApiClient } from '../api/vectrosApi';
 import type { FolderResponse } from '../api/vectrosApi';
 import { dataQueryKeys } from '../lib/dataQueryKeys';
-import { ApiErrorAlert } from './ApiErrorAlert';
 import { folderMenuItems } from './folderMenuItems';
 import { OwnershipScopeField } from './OwnershipScopeField';
 import type { OwnershipScopeSelection } from './OwnershipScopeField';
