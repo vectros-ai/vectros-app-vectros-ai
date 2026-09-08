@@ -240,6 +240,12 @@ export function SchemaDetailPage(): React.JSX.Element {
                     <TableCell align="center">
                       <FormattedMessage id="schemaDetail.colFilterable" />
                     </TableCell>
+                    {/* `inline` keeps a field on the record row when the payload
+                        is stored out of line, so it shows in list/lookup
+                        projections without `includePayload`. */}
+                    <TableCell align="center">
+                      <FormattedMessage id="schemaDetail.colInline" />
+                    </TableCell>
                     <TableCell>
                       <FormattedMessage id="schemaDetail.colFieldDescription" />
                     </TableCell>
@@ -258,6 +264,9 @@ export function SchemaDetailPage(): React.JSX.Element {
                       </TableCell>
                       <TableCell align="center">
                         <BoolCell on={f.filterable} />
+                      </TableCell>
+                      <TableCell align="center">
+                        <BoolCell on={f.inline} />
                       </TableCell>
                       <TableCell>{f.description ?? '—'}</TableCell>
                     </TableRow>

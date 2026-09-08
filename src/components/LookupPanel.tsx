@@ -55,7 +55,8 @@ export type LookupOrder = 'asc' | 'desc';
  * field's SORT key (not the matched value) — valid only there ("use with
  * `value`" per the API), and only offered where the sort key's units are
  * known (see `sortUnitsKnown` below). Absent unless the panel's caller opts
- * in (`supportsSortWindow`) — Documents' lookup request has no such field.
+ * in (`supportsSortWindow`); both the records and the documents lookup
+ * requests accept the pair.
  */
 export type AppliedLookup = { readonly field: string; readonly order: LookupOrder } & (
   | { readonly mode: 'exact'; readonly value: string; readonly sortFrom?: string; readonly sortTo?: string }
@@ -69,8 +70,14 @@ export type AppliedLookup = { readonly field: string; readonly order: LookupOrde
   | { readonly mode: 'prefix'; readonly prefix: string }
 );
 
-/** Only include a key at all when its value is non-empty (never `key: undefined`). */
-function sortBoundArgs(applied: {
+/**
+ * Only include a key at all when its value is non-empty (never `key: undefined`
+ * — the app compiles with `exactOptionalPropertyTypes`, so an explicit
+ * `undefined` is not assignable to an optional field). Exported so the
+ * documents mapping in `DocumentsPage` applies the identical rule rather than
+ * restating it.
+ */
+export function sortBoundArgs(applied: {
   readonly sortFrom?: string;
   readonly sortTo?: string;
 }): { sortFrom?: string; sortTo?: string } {
@@ -203,9 +210,11 @@ interface LookupPanelProps {
   /** DOM id prefix for the labelled selects (unique per page). */
   readonly idPrefix: string;
   /**
-   * Whether the host's lookup endpoint accepts `sortFrom`/`sortTo` at all —
-   * records does; documents doesn't (`DocumentLookupRequest` has no such
-   * field). Defaults to false so a caller must opt in deliberately.
+   * Whether the host's lookup endpoint accepts `sortFrom`/`sortTo` at all.
+   * BOTH do: `RecordLookupRequest` and `DocumentLookupRequest` each declare the
+   * pair. Defaults to false so a caller opts in deliberately rather than by
+   * inheriting it — a host that offers the window must also pass each field's
+   * `sortBy` (see `LookupFieldDef`), or the units guard below cannot run.
    */
   readonly supportsSortWindow?: boolean;
 }
@@ -264,9 +273,18 @@ export function LookupPanel({
   // sortFrom/sortTo are valid only alongside a (fully-specified) exact match,
   // only when the endpoint accepts them at all, and only when the sort key's
   // units are interpretable by this panel.
+  // ...and NOT on a range-enabled field. A `rangeEnabled` lookup is stored as an
+  // ordered row rather than in a fast lookup slot, so it has no sort key to
+  // narrow at all: the server refuses `sortFrom`/`sortTo` on one outright
+  // ("declared rangeEnabled ... so it has no sort key to narrow"), on records
+  // and documents alike. `effectiveMode` does not cover this — a range-enabled
+  // field defaults to `exact`, so without this term the window renders and
+  // EVERY submission is a guaranteed 400. Use `from`/`to` to range over such a
+  // field's own value; the sort window narrows an equality lookup by a SECOND
+  // field, which is exactly what a range-enabled field does not have.
   const showSortWindow =
     supportsSortWindow &&
-    (isComposite ? compositeIsFullTuple : effectiveMode === 'exact') &&
+    (isComposite ? compositeIsFullTuple : effectiveMode === 'exact' && !rangeAvailable) &&
     selectedDef !== undefined &&
     sortUnitsKnown(selectedDef.sortBy);
   // A composite is submittable once its FIRST leg has a value — the API

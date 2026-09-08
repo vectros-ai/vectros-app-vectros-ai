@@ -33,6 +33,7 @@ import {
   TextField,
   ToggleButton,
   ToggleButtonGroup,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import type { SelectChangeEvent } from '@mui/material';
@@ -48,7 +49,8 @@ import type { Vectros, FolderResponse } from '../../api/vectrosApi';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { drainPages } from '../../lib/drainPages';
 import { folderMenuItems } from '../../components/folderMenuItems';
-import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
+import { OwnershipScopeFilter } from '../../components/OwnershipScopeFilter';
+import { ownershipScopeQueryArgs } from '../../lib/ownershipScopes';
 import { ModelPicker } from '../../components/ModelPicker';
 import { InferenceErrorAlert } from '../../components/InferenceErrorAlert';
 import { useInferenceModels } from '../../hooks/useInferenceModels';
@@ -63,6 +65,33 @@ const FOLDER_PAGE_SIZE = 100;
 /** Best available snippet text for a citation. */
 function citationSnippet(c: Vectros.RagSearchResult): string {
   return c.snippet ?? c.chunkText ?? c.contextText ?? '';
+}
+
+/**
+ * The notice for a retrieval `truncation_warning`, chosen by its `reason`.
+ *
+ * Two INDEPENDENT things drop a retrieved result: it did not fit the model's
+ * context window, or it carried no groundable text at all. Only the first is a
+ * budget problem the caller can act on (a narrower query, fewer results); the
+ * second is a property of the source and has no user remedy, so telling someone
+ * their sources were "trimmed to fit the context window" sends them after a fix
+ * that does not exist.
+ *
+ * `reason` is a closed set server-side but typed as a plain string, so an
+ * unrecognized value falls back to a cause-neutral notice rather than asserting
+ * whichever cause we happen to list first.
+ */
+function truncationMessageId(reason: string): string {
+  switch (reason) {
+    case 'context_window_budget':
+      return 'ai.ask.truncatedBudget';
+    case 'no_groundable_content':
+      return 'ai.ask.truncatedNoContent';
+    case 'context_window_budget_and_no_content':
+      return 'ai.ask.truncatedBoth';
+    default:
+      return 'ai.ask.truncated';
+  }
 }
 
 export function AskPage(): React.JSX.Element {
@@ -122,11 +151,15 @@ export function AskPage(): React.JSX.Element {
 
   /** The RagSearch scope object, or undefined when scoping to the whole context. */
   const buildSearch = (): Vectros.RagSearch | undefined => {
-    const search: Vectros.RagSearch = {};
+    // `/v1/rag`'s retrieval takes the same ownership pair as `/v1/search`, and
+    // treats `scope` / `scopeFilters` as mutually exclusive — one helper picks.
+    // SPREAD, not `Object.assign`: the spread is checked against `RagSearch`,
+    // so a field the type does not have is a compile error here. `Object.assign`
+    // is typed `<T, U>(t: T, u: U) => T & U` and constrains `U` not at all, so
+    // it would happily send a misspelled or renamed key.
+    const search: Vectros.RagSearch = { ...ownershipScopeQueryArgs(ownerScope) };
     if (scopeFolderId !== ALL_FOLDERS) search.folderId = scopeFolderId;
     if (contentScope !== 'all') search.contentTypes = [contentScope];
-    const ownerScopeParam = scopeFilterParam(ownerScope);
-    if (ownerScopeParam) search.scope = ownerScopeParam;
     return Object.keys(search).length > 0 ? search : undefined;
   };
 
@@ -211,6 +244,7 @@ export function AskPage(): React.JSX.Element {
           value={ownerScope}
           onChange={setOwnerScope}
           disabled={isStreaming}
+          allowMultiple
         />
       </Box>
 
@@ -303,7 +337,7 @@ export function AskPage(): React.JSX.Element {
             {state.truncation && (
               <Typography variant="caption" color="warning.main" sx={{ display: 'block', mt: 1 }}>
                 <FormattedMessage
-                  id="ai.ask.truncated"
+                  id={truncationMessageId(state.truncation.reason)}
                   values={{
                     used: state.truncation.resultsUsed,
                     requested: state.truncation.resultsRequested,
@@ -351,7 +385,12 @@ export function AskPage(): React.JSX.Element {
                           color="text.secondary"
                           sx={{ fontFamily: 'monospace' }}
                         >
-                          {c.documentId} · {c.score.toFixed(2)}
+                          {c.documentId} ·{' '}
+                          <Tooltip title={intl.formatMessage({ id: 'ai.ask.citationScore' })}>
+                            <Box component="span" sx={{ textDecoration: 'underline dotted' }}>
+                              {c.score.toFixed(3)}
+                            </Box>
+                          </Tooltip>
                         </Typography>
                       </Box>
                     </ListItem>

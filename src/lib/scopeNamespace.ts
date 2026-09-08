@@ -18,13 +18,33 @@ export const SCOPE_NAMESPACE_PATTERN = /^[a-z][a-z0-9_-]{1,31}$/;
 /** The two built-in namespaces. */
 export const SCOPE_BUILTIN_NAMESPACES = ['org', 'client'] as const;
 
-/** Reserved namespaces the platform rejects. */
+/**
+ * Namespaces the platform refuses, mirrored from its own forbidden set.
+ *
+ * Two families, and both are permanent rather than stylistic. `record`,
+ * `document`, `entity` and `user` are SURFACE names: a schema reference's
+ * target is resolved as a fixed surface before it is resolved as a namespace,
+ * so a namespace sharing a surface's name would be permanently shadowed and
+ * references to it would silently resolve against the wrong plane. `versions`
+ * and `lookup` are entity sub-path route segments, forbidden so those routes
+ * cannot misroute. `self`, `tenant`, `context` and `scope` are grammar words.
+ *
+ * This list exists so a doomed value is refused in the box instead of at the
+ * server, which is the whole point of this module — so it must stay complete.
+ * It had drifted to only the four grammar words plus `user`, leaving
+ * `document:acme` and friends to validate cleanly and then 400.
+ */
 export const SCOPE_RESERVED_NAMESPACES = [
   'user',
+  'record',
+  'document',
+  'entity',
   'self',
   'tenant',
   'context',
   'scope',
+  'versions',
+  'lookup',
 ] as const;
 
 /** An owned item may carry at most this many scope namespaces. */
@@ -40,9 +60,7 @@ export type ScopeNamespaceError =
  * Validate a single namespace against the platform grammar + reserved list.
  * Returns null when valid; `org` / `client` are valid (built-ins).
  */
-export function validateScopeNamespace(
-  namespace: string,
-): ScopeNamespaceError | null {
+export function validateScopeNamespace(namespace: string): ScopeNamespaceError | null {
   const ns = namespace.trim();
   if (ns === '') return { code: 'empty' };
   if ((SCOPE_RESERVED_NAMESPACES as readonly string[]).includes(ns)) {

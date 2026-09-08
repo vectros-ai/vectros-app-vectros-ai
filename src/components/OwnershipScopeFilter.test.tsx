@@ -8,6 +8,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { OwnershipScopeFilter, scopeFilterParam } from './OwnershipScopeFilter';
+import { MAX_SCOPE_FILTERS } from '../lib/ownershipScopes';
 import { TestProviders } from '../test/TestProviders';
 
 describe('scopeFilterParam', () => {
@@ -56,5 +57,74 @@ describe('OwnershipScopeFilter', () => {
     );
     await user.type(screen.getByRole('textbox', { name: /owner scope/i }), 'g');
     expect(onChange).toHaveBeenCalledWith('g');
+  });
+
+  // `allowMultiple` swaps BOTH the validator and the whole `*Multi` message
+  // family. Nothing else in the suite renders it, so without these cells a
+  // missing or mis-suffixed id would render the raw id string to the user and
+  // every test would still pass (this app has no i18n key-completeness check).
+  describe('allowMultiple', () => {
+    it('accepts several dimensions and shows the multi help text, not a raw message id', () => {
+      render(
+        <TestProviders>
+          <OwnershipScopeFilter value="org:acme, client:pilot" onChange={vi.fn()} allowMultiple />
+        </TestProviders>,
+      );
+      expect(
+        screen.getByText(
+          new RegExp(`separate up to ${MAX_SCOPE_FILTERS} dimensions with commas`, 'i'),
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/ownershipScope\./)).not.toBeInTheDocument();
+    });
+
+    // Each failure has a DIFFERENT fix, so each gets its own message and the
+    // three are distinguishable on screen. They previously collapsed into one
+    // sentence, which hid which rule was broken and forced the cap to be
+    // restated as a literal beside `MAX_SCOPE_FILTERS`.
+    it('names the duplicated namespace — otherwise the filter is silently dropped', () => {
+      // The failure this guards: an unusable multi-filter yields NO ownership
+      // narrowing at all, so the results silently widen. The error state is the
+      // only thing telling the user their filter is not being applied.
+      render(
+        <TestProviders>
+          <OwnershipScopeFilter value="org:a, org:b" onChange={vi.fn()} allowMultiple />
+        </TestProviders>,
+      );
+      expect(screen.getByText(/“org” is named more than once/i)).toBeInTheDocument();
+    });
+
+    it('reports the cap from the shared constant, not a second copy of the number', () => {
+      const tooMany = Array.from({ length: MAX_SCOPE_FILTERS + 1 }, (_, i) => `ns${i}:v`).join(', ');
+      render(
+        <TestProviders>
+          <OwnershipScopeFilter value={tooMany} onChange={vi.fn()} allowMultiple />
+        </TestProviders>,
+      );
+      expect(
+        screen.getByText(new RegExp(`at most ${MAX_SCOPE_FILTERS}`, 'i')),
+      ).toBeInTheDocument();
+    });
+
+    it('quotes the offending entry when one is malformed', () => {
+      render(
+        <TestProviders>
+          <OwnershipScopeFilter value="org:acme, nope" onChange={vi.fn()} allowMultiple />
+        </TestProviders>,
+      );
+      expect(screen.getByText(/“nope” isn’t a valid namespace:value/i)).toBeInTheDocument();
+    });
+
+    it('does NOT accept a comma-separated value when the host has not opted in', () => {
+      // The single-dimension pages (records/documents lists) take only `scope`.
+      // Pairing `allowMultiple` with the wrong param helper is the live trap;
+      // this pins the default to the single-dimension validator.
+      render(
+        <TestProviders>
+          <OwnershipScopeFilter value="org:acme, client:pilot" onChange={vi.fn()} />
+        </TestProviders>,
+      );
+      expect(screen.getByText(/use namespace:value, e\.g\./i)).toBeInTheDocument();
+    });
   });
 });

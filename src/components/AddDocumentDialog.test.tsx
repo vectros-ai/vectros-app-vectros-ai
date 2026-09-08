@@ -2,7 +2,10 @@
 // AddDocumentDialog tests — the multi-step upload path (presign → S3 PUT) is the
 // riskiest data flow in the app, and its failure branches were previously only
 // happy-path-exercised. Covers: upload success, the missing-presigned-URL and
-// failed-S3-PUT error branches, ingest success, and folder wiring.
+// failed-S3-PUT error branches, ingest success, and folder wiring — plus the
+// compensation those two failure branches owe: the document created before the
+// bytes existed is deleted again, while one merely matched by externalId (which
+// predates the call, bytes intact) is deliberately left alone.
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
@@ -149,6 +152,131 @@ describe('AddDocumentDialog — upload mode', () => {
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // --- Compensation: the presign->PUT pair is not one transaction ------------
+  // uploadDocument() creates the document row BEFORE the bytes exist, so every
+  // failure after it has to undo that row or the user is left with a phantom,
+  // byte-less document they cannot remove from the app.
+
+  it('deletes the document it created when the S3 PUT fails', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_new', created: true, uploadUrl: 'https://s3.example/put' });
+    const deleteDocument = vi.fn().mockResolvedValue({});
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+    stub({ uploadDocument, deleteDocument });
+
+    const { onClose } = renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await vi.waitFor(() => expect(deleteDocument).toHaveBeenCalledWith({ id: 'doc_new' }));
+    // The original PUT failure is still what the user sees, and the dialog stays
+    // open so the upload can be retried.
+    expect(await screen.findByRole('alert')).toHaveTextContent(/couldn.t add this document/i);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('deletes the document it created when no presigned URL comes back', async () => {
+    const user = userEvent.setup();
+    // The document row exists even though there is no URL to place bytes at,
+    // so this branch strands a phantom exactly as a rejected PUT does.
+    const uploadDocument = vi.fn().mockResolvedValue({ id: 'doc_new', created: true });
+    const deleteDocument = vi.fn().mockResolvedValue({});
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    stub({ uploadDocument, deleteDocument });
+
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await vi.waitFor(() => expect(deleteDocument).toHaveBeenCalledWith({ id: 'doc_new' }));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('never deletes a document merely MATCHED by externalId when the PUT fails', async () => {
+    const user = userEvent.setup();
+    // created:false = the externalId matched a document that already existed.
+    // A failed PUT leaves its stored bytes untouched; deleting it would destroy
+    // the user's own data to clean up a write that never landed.
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_preexisting', created: false, uploadUrl: 'https://s3.example/put' });
+    const deleteDocument = vi.fn().mockResolvedValue({});
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+    stub({ uploadDocument, deleteDocument });
+
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.type(screen.getByLabelText('External ID (optional)'), 'po-42');
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    // The failure still surfaces...
+    expect(await screen.findByRole('alert')).toHaveTextContent(/couldn.t add this document/i);
+    // ...but the pre-existing document is left alone.
+    expect(deleteDocument).not.toHaveBeenCalled();
+    // Pin the input that makes `created:false` reachable at all — without an
+    // externalId the API can never return a match, so a cell that did not send
+    // one would be asserting against a case it had not actually set up.
+    expect(uploadDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ externalId: 'po-42' }),
+    );
+  });
+
+  it('surfaces the original upload error even when the compensating delete fails', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_new', created: true, uploadUrl: 'https://s3.example/put' });
+    // The cleanup failure carries a requestId; the upload failure does not. The
+    // alert's body text is identical either way (it is a static message), so the
+    // rendered Reference ID is the ONLY thing that distinguishes which error
+    // reached the user — assert on that rather than on text that cannot tell them
+    // apart. e.g. a credential that can create documents but not delete them.
+    // `body.requestId`, not a bare `requestId` — that is the shape
+    // RequestIdCaption's own extractor reads, and putting it anywhere else makes
+    // the assertion below pass for the wrong reason.
+    const cleanupError = Object.assign(new Error('403 forbidden'), {
+      body: { requestId: 'cleanup-request-id' },
+    });
+    const deleteDocument = vi.fn().mockRejectedValue(cleanupError);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+    stub({ uploadDocument, deleteDocument });
+
+    const { onClose } = renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await vi.waitFor(() => expect(deleteDocument).toHaveBeenCalled());
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/couldn.t add this document/i);
+    // The cleanup error did NOT replace the upload error.
+    expect(alert).not.toHaveTextContent('cleanup-request-id');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('does not delete when the response cannot prove this call created the document', async () => {
+    const user = userEvent.setup();
+    // No `created` flag at all. The guard is `=== true` rather than a truthiness
+    // check precisely for this: absent means "cannot prove we made it", which has
+    // to fall on the side of keeping the document. A weakening of the guard to
+    // `!== false` inverts that, and this is the cell that catches it.
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_unknown', uploadUrl: 'https://s3.example/put' });
+    const deleteDocument = vi.fn().mockResolvedValue({});
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 403 }));
+    stub({ uploadDocument, deleteDocument });
+
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/couldn.t add this document/i);
+    expect(deleteDocument).not.toHaveBeenCalled();
   });
 
   it('rejects an oversize file up front with a message + disabled Upload', async () => {

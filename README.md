@@ -24,9 +24,9 @@ Fork it. Re-brand it in one file. Point it at your own Cognito pool. Ship.
 |---|---|
 | Context switcher | Pick any AppContext you can reach across your live/test environments; every query keys on `(tenant, context)` and a switch re-mints the scoped bearer. |
 | Records explorer + editor | Browse by type with schema-driven columns, client-side sort/filter, and server-side lookups (exact / range / prefix on a single lookup field, or an exact match across every field of a composite lookup declared over several — optionally narrowed further by a sort-key window on an exact match); create/edit in a dual-mode (typed form / raw JSON) editor with optimistic-concurrency conflict handling; archive/restore. |
-| Documents | Browse by type and folder, look up by external ID or schema lookup fields, typed metadata, an in-app Markdown viewer (with click-to-view for file-backed documents), signed downloads, create via file upload or text ingest (optional external IDs + update-if-exists), archive/restore, and replace-a-file with automatic re-extraction and re-indexing. |
+| Documents | Browse by type and folder, look up by external ID or schema lookup fields (optionally narrowed by a sort-key window on an exact match), typed metadata, an in-app Markdown viewer (with click-to-view for file-backed documents), signed downloads, create via file upload or text ingest (optional external IDs + update-if-exists), archive/restore, and replace-a-file with automatic re-extraction and re-indexing. |
 | Folders | Create/rename/delete with server-side folder-scoped listing and "ask this folder" deep links into the AI workspace. |
-| Hybrid search | One ranked result set across records and documents: ranking mode (hybrid/semantic/keyword), content-source, folder, and type filters, offset paging. |
+| Hybrid search | One ranked result set across records and documents: ranking mode (hybrid/semantic/keyword), content-source, folder, type, and owner-scope filters (narrow by several ownership dimensions at once, e.g. `org:acme, client:pilot`), offset paging. |
 | AI workspace | Multi-turn chat over the context's data, single-shot ask with citations, and per-document Q&A — all streaming, with a model picker. |
 | Version history | The audit trail (who changed what, when) on every record and document detail. |
 | Cognito authentication | Amplify v6 against the shared DeveloperUserPool, via `@vectros-ai/react`'s `CognitoAuthProvider`. Sign-in + MFA challenge only — account setup lives in the admin app. |
@@ -47,8 +47,8 @@ exactly so the reference apps share one set of conventions:
 | Auth | [aws-amplify](https://docs.amplify.aws/) v6 (Cognito) via `@vectros-ai/react` |
 | UI | [MUI v7](https://mui.com/) |
 | Server state | [TanStack Query](https://tanstack.com/query) v5 |
-| Routing | [react-router](https://reactrouter.com/) v7 |
-| Data SDK | [`@vectros-ai/sdk`](https://docs.vectros.ai) (typed, regenerated per backend MR) |
+| Routing | [react-router](https://reactrouter.com/) v8 |
+| Data SDK | [`@vectros-ai/sdk`](https://docs.vectros.ai) (typed, regenerated from the API's OpenAPI surface each release) |
 | Tests | [Vitest](https://vitest.dev/) 4 + Testing Library + jsdom |
 | Lint | ESLint 9 flat config + `typescript-eslint` + `jsx-a11y` + `react-hooks` |
 
@@ -61,6 +61,12 @@ npm install
 cp .env.example .env.local           # fill in your Cognito pool + API origin
 npm run dev                          # dev server on port 3002
 ```
+
+> [!NOTE]
+> Some npm 10.x versions crash on `npm install` with `Cannot read properties of null (reading
+> 'edgesOut')` while resolving Vitest 4's optional peer dependencies — a known, still-open npm
+> bug ([npm/cli#9787](https://github.com/npm/cli/issues/9787)), not a real dependency conflict
+> here. Run `npm install --legacy-peer-deps` instead if you hit it.
 
 Open http://127.0.0.1:3002.
 

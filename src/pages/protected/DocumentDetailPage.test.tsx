@@ -273,6 +273,69 @@ describe('DocumentDetailPage', () => {
     );
   });
 
+  it('deletes the stray document when a replace MISSED the externalId and minted a new one', async () => {
+    const user = userEvent.setup();
+    // The lookup missed — the document was deleted elsewhere, or its type moved —
+    // so the platform created a NEW document (`created: true`) instead of
+    // re-issuing a URL to this one. A failed PUT then strands that new document.
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_stray', created: true, uploadUrl: 'https://s3.example/put' });
+    const deleteDocument = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'contract.pdf',
+        status: 'ACTIVE',
+        externalId: 'contract-7',
+        fileType: 'application/pdf',
+        storeText: false,
+      }),
+      uploadDocument,
+      deleteDocument,
+    });
+
+    renderDetail();
+    const file = new File(['new bytes'], 'contract-v2.pdf', { type: 'application/pdf' });
+    await screen.findByRole('button', { name: 'Replace file' });
+    await user.upload(screen.getByLabelText('Replacement file'), file);
+
+    await vi.waitFor(() => expect(deleteDocument).toHaveBeenCalledWith({ id: 'doc_stray' }));
+  });
+
+  it('never deletes on a failed replace that re-used the existing document', async () => {
+    const user = userEvent.setup();
+    // The ordinary path: the externalId matched, so `created` is false and the
+    // document on screen is the one being replaced. Its stored file is untouched
+    // by the failed PUT — deleting here would destroy the user's own document.
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_1', created: false, uploadUrl: 'https://s3.example/put' });
+    const deleteDocument = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'contract.pdf',
+        status: 'ACTIVE',
+        externalId: 'contract-7',
+        fileType: 'application/pdf',
+        storeText: false,
+      }),
+      uploadDocument,
+      deleteDocument,
+    });
+
+    renderDetail();
+    const file = new File(['new bytes'], 'contract-v2.pdf', { type: 'application/pdf' });
+    await screen.findByRole('button', { name: 'Replace file' });
+    await user.upload(screen.getByLabelText('Replacement file'), file);
+
+    await vi.waitFor(() => expect(uploadDocument).toHaveBeenCalled());
+    expect(deleteDocument).not.toHaveBeenCalled();
+  });
+
   it('disables Replace file for a file-backed document without an externalId', async () => {
     stub({
       getDocument: vi.fn().mockResolvedValue({

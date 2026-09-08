@@ -3,6 +3,89 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.19.0 — 2026-09-07
+
+### Added
+
+- **Search and Ask can narrow by more than one ownership dimension at once.** The
+  owner-scope box on Search and on the AI workspace's Ask tab now takes a
+  comma-separated list — `org:acme, client:pilot` narrows to one client within one
+  org, rather than forcing a choice between the two. A single dimension is sent as
+  before; several are sent as the search/RAG `scopeFilters` array, which the API
+  treats as mutually exclusive with the single-dimension `scope` field. Up to 16
+  dimensions, each namespace named at most once; a filter that breaks either rule
+  is flagged in the box instead of firing a request the API would reject.
+- **Document lookups can be narrowed by a sort-key window.** A fully-specified
+  exact lookup on the Documents explorer now offers the same `Sort from` / `Sort to`
+  bounds the Records explorer already had. The documents lookup endpoint has
+  accepted these bounds since the previous API release; this app withheld the
+  control on the mistaken premise that it did not, so the feature was unreachable
+  from the UI.
+- **The schema viewer shows the `inline` field flag.** A field declared `inline`
+  stays on the record row when the payload is stored out of line, so it appears in
+  list and lookup projections without requesting the payload. Schemas that opt in
+  to firing triggers also surface `triggersEnabled` in the capability chips.
+
+### Changed
+
+- **A retrieval score in the AI workspace's citations is now labeled, and shown to
+  three decimals.** Retrieval runs in hybrid mode, where the score is a Reciprocal
+  Rank Fusion value — small and tightly clustered (about 0.016 for a passage ranked
+  top on one retrieval leg, about 0.033 for one ranked top on both) rather than a
+  0–1 confidence. Rendered bare to two decimals it read as "2% relevant", which is
+  not what it means. Search results are unaffected: the percentage there is the
+  semantic similarity, which genuinely is 0–1.
+- **A search result's date is labeled "Indexed".** It is when the item entered the
+  search index — usually when it was created, but later for anything re-indexed
+  onto a new entry. The item's own creation time is on its detail page.
+- Bundled `@vectros-ai/sdk` updated to the 0.43.0 line.
+
+### Fixed
+
+- **A failed file upload no longer leaves a document behind with no file in it.**
+  Adding a document by file is two steps: the document is created, then the bytes
+  are sent. If the second step failed, the first was left standing — a document
+  with nothing in it, absent from search and impossible to download, which you then
+  had to find and delete by hand from its own page. (It was never permanent: the
+  platform expires an upload that never completes after 24 hours. It was just yours
+  to look at until then.) The dialog now deletes the document it created when the
+  upload fails, and reports the upload error rather than a cleanup one. A document
+  matched by an existing **External ID** is never deleted this way — it was there
+  before the upload started.
+- **Replacing a file no longer leaves a stray document behind in the one case where
+  it could.** Replacing normally re-uses the document you are already looking at and
+  creates nothing. But if its External ID no longer matches anything — the document
+  was deleted elsewhere, or its type changed — the platform creates a new document
+  instead, and a failed upload stranded that one. It is now cleaned up on failure,
+  and only ever in that case.
+- **The AI workspace's "sources were trimmed" notice no longer asserts a cause it
+  cannot know.** Two independent things drop a retrieved source: it did not fit the
+  model's context window, or it carried no usable text to ground an answer. Only the
+  first is a budget problem you can act on; the notice claimed it for both, sending
+  you after a remedy that does not exist. It now reports the cause the API gives,
+  and falls back to a cause-neutral wording for a value it does not recognize.
+- **Folder-delete now says records too.** A folder counts as non-empty if it holds
+  documents, **records**, or sub-folders; both messages named only documents and
+  sub-folders. Note the pre-delete warning still cannot see records — this page
+  lists none — so a folder holding only records shows no warning and is refused by
+  the server, which is the authoritative check either way.
+- **The sort-key window is no longer offered on a range-enabled lookup field.** Such
+  a field is stored as an ordered row rather than in a fast lookup slot, so it has no
+  sort key to narrow and the API refuses `sortFrom`/`sortTo` on one outright — the
+  control was offered anyway (exact is the default match mode), so every submission
+  was a guaranteed error. Range over that field's own value with the From/To bounds
+  instead; the sort window narrows an equality lookup by a *second* field. This
+  affected the records explorer only; the documents explorer's new window (above)
+  is offered under the corrected rule from the start.
+- **The owner-scope box now refuses every namespace the API refuses.** It knew four
+  reserved words plus `user`; the API forbids ten. `document:acme`, `record:…`,
+  `entity:…`, `versions:…` and `lookup:…` validated cleanly and were then rejected
+  by the server — the exact outcome this validation exists to prevent.
+- Corrected the sort-window hint on the Documents explorer, which stated that the
+  documents lookup endpoint has no sort-key bounds. It does.
+- Corrected the stack table in the README, which named react-router v7 while the
+  app has been on v8.
+
 ## 0.18.0 — 2026-08-28
 
 ### Changed

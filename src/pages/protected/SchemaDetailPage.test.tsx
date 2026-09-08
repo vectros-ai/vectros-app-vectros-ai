@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { Route, Routes } from 'react-router';
 import { CurrentTenantProvider } from '@vectros-ai/react';
 import type { TenantMembership } from '@vectros-ai/react';
@@ -89,6 +89,52 @@ describe('SchemaDetailPage', () => {
     // Only the enabled capability surfaces as a chip.
     expect(screen.getByText('auditHistory')).toBeInTheDocument();
     expect(screen.queryByText('versioning')).not.toBeInTheDocument();
+  });
+
+  // SDK 0.43.0 added the `inline` field flag (keeps a field on the record row
+  // when the payload is stored out of line) and the `triggersEnabled` schema
+  // capability. The flag needed a column; the capability needed nothing, since
+  // the chip list is built from `capabilities` generically — this proves that
+  // rather than assuming it.
+  it('renders the inline field flag, and surfaces triggersEnabled with no per-capability code', async () => {
+    stubGetSchema(
+      vi.fn().mockResolvedValue({
+        id: 's1',
+        typeName: 'intake_form',
+        displayName: 'Intake Form',
+        storageProfile: 'LARGE_PAYLOAD',
+        schemaVersion: 1,
+        active: true,
+        fields: [
+          { fieldId: 'status', fieldType: 'string', inline: true },
+          { fieldId: 'notes', fieldType: 'string' },
+        ],
+        lookupFields: [],
+        capabilities: { triggersEnabled: true, auditHistory: false },
+      }),
+    );
+
+    renderDetail();
+
+    const inlineHeader = await screen.findByRole('columnheader', { name: 'Inline' });
+    // Resolve the column by its HEADER position rather than hard-coding an
+    // index, so inserting another column ahead of it cannot silently move what
+    // this asserts onto a different flag.
+    const headers = within(inlineHeader.closest('tr') as HTMLElement).getAllByRole('columnheader');
+    const inlineCol = headers.indexOf(inlineHeader);
+    expect(inlineCol).toBeGreaterThan(-1);
+
+    const cellFor = (fieldId: string): HTMLElement => {
+      const row = screen.getByText(fieldId).closest('tr');
+      expect(row).not.toBeNull();
+      return (row as HTMLTableRowElement).cells[inlineCol] as HTMLElement;
+    };
+    // The declared-inline field is ticked; the plain one is not.
+    expect(cellFor('status')).toHaveTextContent('✓');
+    expect(cellFor('notes')).not.toHaveTextContent('✓');
+
+    expect(screen.getByText('triggersEnabled')).toBeInTheDocument();
+    expect(screen.queryByText('auditHistory')).not.toBeInTheDocument();
   });
 
   it('renders a composite lookup (fieldNames, no fieldName) by its joined identity', async () => {

@@ -449,6 +449,152 @@ describe('DocumentsPage', () => {
     );
   });
 
+  // The sort window (`sortFrom`/`sortTo`) narrows an exact match by the lookup
+  // field's SORT key. `DocumentLookupRequest` has accepted the pair since the
+  // API added it; this page withheld the opt-in on the mistaken premise that
+  // the documents endpoint had no such field, so the bounds could not be
+  // reached from the UI at all. This asserts they now reach the wire.
+  it('narrows a documents lookup by the sort window, and omits an empty bound', async () => {
+    const user = userEvent.setup();
+    const lookupDocumentsByBody = vi.fn().mockResolvedValue(pageOf([]));
+    stub({
+      folders: vi.fn().mockResolvedValue(pageOf([{ id: 'f1', name: 'Reports' }])),
+      schemas: vi.fn().mockResolvedValue(pageOf([DECISION_SCHEMA])),
+      documents: vi.fn().mockResolvedValue(pageOf(TYPED_DOCS)),
+      lookupDocumentsByBody,
+    });
+    renderPage(['/?type=decision']);
+
+    await user.click(await screen.findByRole('combobox', { name: /look up by/i }));
+    await user.click(await screen.findByRole('option', { name: 'externalId' }));
+    await user.type(screen.getByRole('textbox', { name: 'Value' }), 'dec-1');
+
+    // Offered at all — the regression this guards is the window silently not
+    // rendering because the page stopped opting in.
+    await user.type(screen.getByRole('textbox', { name: 'Sort from' }), '1700000000000');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+
+    // `sortFrom` rides the body; `sortTo` is ABSENT, not `undefined` — the app
+    // compiles with `exactOptionalPropertyTypes` and the SDK omits empty keys.
+    await waitFor(() =>
+      expect(lookupDocumentsByBody).toHaveBeenCalledWith({
+        type: 'decision',
+        field: 'externalId',
+        value: 'dec-1',
+        sortFrom: '1700000000000',
+        order: 'asc',
+        limit: 100,
+      }),
+    );
+    expect(Object.keys(lookupDocumentsByBody.mock.calls[0]?.[0] ?? {})).not.toContain('sortTo');
+  });
+
+  // Guards the units gate. The panel hides the sort window when the lookup's
+  // sort key is a declared field, whose value space it cannot interpret — the
+  // bounds are documented as epoch millis only for the createdAt/lastUpdated
+  // default. That gate reads `sortBy` off the field def, so this page must pass
+  // it through; when it did not, every exact lookup got the window, including
+  // this one, and a user's epoch-millis bound would have ranged over `priority`.
+  it('hides the sort window for a lookup sorted by a declared field, whose units it cannot interpret', async () => {
+    const user = userEvent.setup();
+    stub({
+      folders: vi.fn().mockResolvedValue(pageOf([])),
+      schemas: vi.fn().mockResolvedValue(
+        pageOf([
+          {
+            ...DECISION_SCHEMA,
+            lookupFields: [{ fieldName: 'caseId', sortBy: 'priority' }],
+          },
+        ]),
+      ),
+      documents: vi.fn().mockResolvedValue(pageOf(TYPED_DOCS)),
+    });
+    renderPage(['/?type=decision']);
+
+    await user.click(await screen.findByRole('combobox', { name: /look up by/i }));
+    await user.click(await screen.findByRole('option', { name: 'caseId' }));
+    await user.type(screen.getByRole('textbox', { name: 'Value' }), 'c-1');
+
+    expect(screen.queryByRole('textbox', { name: 'Sort from' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Sort to' })).not.toBeInTheDocument();
+
+    // Control: externalId declares no sortBy, so it defaults to createdAt and
+    // DOES offer the window — proving the assertion above is about `sortBy`,
+    // not about the opt-in having been silently lost.
+    await user.click(screen.getByRole('combobox', { name: /look up by/i }));
+    await user.click(await screen.findByRole('option', { name: 'externalId' }));
+    await user.type(screen.getByRole('textbox', { name: 'Value' }), 'dec-1');
+    expect(screen.getByRole('textbox', { name: 'Sort from' })).toBeInTheDocument();
+  });
+
+  it('carries both sort bounds when both are given', async () => {
+    const user = userEvent.setup();
+    const lookupDocumentsByBody = vi.fn().mockResolvedValue(pageOf([]));
+    stub({
+      folders: vi.fn().mockResolvedValue(pageOf([])),
+      schemas: vi.fn().mockResolvedValue(pageOf([DECISION_SCHEMA])),
+      documents: vi.fn().mockResolvedValue(pageOf(TYPED_DOCS)),
+      lookupDocumentsByBody,
+    });
+    renderPage(['/?type=decision']);
+
+    await user.click(await screen.findByRole('combobox', { name: /look up by/i }));
+    await user.click(await screen.findByRole('option', { name: 'externalId' }));
+    await user.type(screen.getByRole('textbox', { name: 'Value' }), 'dec-1');
+    await user.type(screen.getByRole('textbox', { name: 'Sort from' }), '1700000000000');
+    await user.type(screen.getByRole('textbox', { name: 'Sort to' }), '1800000000000');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+
+    await waitFor(() =>
+      expect(lookupDocumentsByBody).toHaveBeenCalledWith({
+        type: 'decision',
+        field: 'externalId',
+        value: 'dec-1',
+        sortFrom: '1700000000000',
+        sortTo: '1800000000000',
+        order: 'asc',
+        limit: 100,
+      }),
+    );
+  });
+
+  // The owner-scope box on THIS page is single-dimension: the documents LIST
+  // endpoint takes only `scope`. A comma-separated value must therefore be
+  // refused in the box rather than silently dropped, which would widen the
+  // result set with no visible cause.
+  it('flags a multi-dimension owner scope and sends no scope at all', async () => {
+    const user = userEvent.setup();
+    const documents = vi.fn().mockResolvedValue(pageOf(TYPED_DOCS));
+    // A folder is what makes the filter row render at all.
+    stub({
+      folders: vi.fn().mockResolvedValue(pageOf([{ id: 'f1', name: 'Reports' }])),
+      documents,
+    });
+    renderPage();
+
+    await user.type(
+      await screen.findByRole('textbox', { name: /owner scope/i }),
+      'org:acme, client:pilot',
+    );
+
+    expect(screen.getByText(/use namespace:value, e\.g\./i)).toBeInTheDocument();
+
+    // The invariant is about what reaches the WIRE, asserted over every call.
+    // Not the last call: the box filters live, so the prefix `org:acme` is
+    // legitimately valid part-way through typing and fires its own request;
+    // once the value goes invalid the key reverts to the unscoped one, which
+    // react-query serves from cache — so no NEW call marks the settled state.
+    // What must never happen is the comma-separated value reaching this
+    // endpoint, which has no `scopeFilters` and would read it as one long
+    // value or refuse it outright.
+    await waitFor(() => expect(documents).toHaveBeenCalled());
+    expect(
+      documents.mock.calls.every(
+        ([arg]) => !((arg as { scope?: string })?.scope ?? '').includes(','),
+      ),
+    ).toBe(true);
+  });
+
   it('never offers a composite lookup field, even if one somehow appears on a document-viewable schema', async () => {
     // A composite is structurally record-only (the server refuses one unless
     // allowedSurfaces is EXACTLY ['record']), so this schema could never

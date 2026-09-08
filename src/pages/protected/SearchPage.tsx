@@ -56,7 +56,8 @@ import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { drainPages } from '../../lib/drainPages';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { folderMenuItems } from '../../components/folderMenuItems';
-import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
+import { OwnershipScopeFilter } from '../../components/OwnershipScopeFilter';
+import { ownershipScopeQueryArgs, scopeFiltersParam } from '../../lib/ownershipScopes';
 
 /** Result page size — the API caps at 100; 25 is a reasonable page. */
 const SEARCH_LIMIT = 25;
@@ -102,10 +103,13 @@ export function SearchPage(): React.JSX.Element {
   const [scope, setScope] = useState<Scope>('all');
   const [folderFilter, setFolderFilter] = useState<string>(ALL_FOLDERS);
   const [typeFilter, setTypeFilter] = useState<string>(ANY_TYPE);
-  // Ownership filter (`scope=<namespace>:<value>`) — the item OWNER, distinct
-  // from the `scope` content-type control above. Only applied when well-formed.
+  // Ownership filter — the item OWNER, distinct from the `scope` content-type
+  // control above. Only applied when well-formed. `/v1/search` narrows by more
+  // than one dimension via `scopeFilters` (e.g. `org:acme, client:pilot`), so
+  // this box takes a comma-separated list; `ownershipScopeQueryArgs` picks the
+  // `scope`-vs-`scopeFilters` wire field, which the API treats as exclusive.
   const [ownerScope, setOwnerScope] = useState('');
-  const ownerScopeParam = scopeFilterParam(ownerScope);
+  const ownerScopeEntries = scopeFiltersParam(ownerScope);
 
   // Filter option sources (cached; shared with the records/documents pages).
   const foldersQuery = useQuery({
@@ -147,7 +151,7 @@ export function SearchPage(): React.JSX.Element {
     scope,
     folder: folderId ?? null,
     type: typeName ?? null,
-    owner: ownerScopeParam ?? null,
+    owner: ownerScopeEntries ?? null,
   });
 
   const searchQuery = useInfiniteQuery({
@@ -162,7 +166,7 @@ export function SearchPage(): React.JSX.Element {
         ...(contentTypes ? { contentTypes } : {}),
         ...(folderId ? { folderId } : {}),
         ...(typeName ? { typeName } : {}),
-        ...(ownerScopeParam ? { scope: ownerScopeParam } : {}),
+        ...ownershipScopeQueryArgs(ownerScope),
       });
     },
     initialPageParam: 0,
@@ -315,7 +319,7 @@ export function SearchPage(): React.JSX.Element {
             </FormControl>
           )}
 
-          <OwnershipScopeFilter value={ownerScope} onChange={setOwnerScope} />
+          <OwnershipScopeFilter value={ownerScope} onChange={setOwnerScope} allowMultiple />
         </Box>
       </Stack>
 
@@ -439,10 +443,29 @@ function ResultCard({ result, folderNameById }: ResultCardProps): React.JSX.Elem
             {body}
           </Typography>
         )}
+        {/* `createdAt` on a search HIT is when the item entered the search
+            index — usually the moment it was created, but later for anything
+            re-indexed onto a new entry. It is not the source item's own
+            `createdAt`; that comes from documents.get / records.get, which the
+            detail pages show. Labeled so it can't be read as the wrong one. */}
         {result.createdAt && (
-          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
-            <FormattedDate value={result.createdAt} year="numeric" month="short" day="numeric" />
-          </Typography>
+          <Tooltip title={intl.formatMessage({ id: 'search.indexedAt' })}>
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              <FormattedMessage
+                id="search.indexedOn"
+                values={{
+                  date: (
+                    <FormattedDate
+                      value={result.createdAt}
+                      year="numeric"
+                      month="short"
+                      day="numeric"
+                    />
+                  ),
+                }}
+              />
+            </Typography>
+          </Tooltip>
         )}
       </CardContent>
     </Card>

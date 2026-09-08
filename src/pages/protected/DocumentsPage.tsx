@@ -96,7 +96,7 @@ import { FolderEditorDialog } from '../../components/FolderEditorDialog';
 import { OwnershipScopeFilter, scopeFilterParam } from '../../components/OwnershipScopeFilter';
 import { OwnershipScopeChips } from '../../components/OwnershipScopeChips';
 import { IndexStatusChip } from '../../components/IndexStatusChip';
-import { LookupPanel } from '../../components/LookupPanel';
+import { LookupPanel, sortBoundArgs } from '../../components/LookupPanel';
 import type { AppliedLookup, LookupFieldDef } from '../../components/LookupPanel';
 import { AddDocumentDialog } from '../../components/AddDocumentDialog';
 import { RefreshButton } from '../../components/RefreshButton';
@@ -124,16 +124,21 @@ function payloadOf(d: DocumentResponse): Record<string, unknown> | undefined {
  * `appliedLookupModeArgs` — `DocumentLookupRequest` has no `values` field at
  * all (composite lookups are record-only; see `lookupDefs` above), so the
  * shared helper's `multi` branch doesn't type-check against this endpoint.
+ * The `sortFrom`/`sortTo` window IS shared, via `sortBoundArgs` — this
+ * endpoint accepts the pair on an exact match exactly as records' does.
  * `multi` can't actually be selected here (lookupDefs never offers a
  * composite), so this throws rather than silently drop it — a defensive
  * backstop, not an expected path.
  */
 function documentLookupModeArgs(
   applied: AppliedLookup,
-): { value: string } | { from: string; to: string } | { prefix: string } {
+):
+  | { value: string; sortFrom?: string; sortTo?: string }
+  | { from: string; to: string }
+  | { prefix: string } {
   switch (applied.mode) {
     case 'exact':
-      return { value: applied.value };
+      return { value: applied.value, ...sortBoundArgs(applied) };
     case 'range':
       return { from: applied.from, to: applied.to };
     case 'prefix':
@@ -286,7 +291,16 @@ export function DocumentsPage(): React.JSX.Element {
             (l): l is typeof l & { fieldName: string } =>
               typeof l.fieldName === 'string' && l.fieldName !== 'externalId',
           )
-          .map((l) => ({ fieldName: l.fieldName, rangeEnabled: l.rangeEnabled === true })),
+          // `sortBy` must ride along: the panel hides the sort window when the
+          // sort key's units are not interpretable, and it decides that from
+          // this field. Dropping it made `sortUnitsKnown` unconditionally true,
+          // offering an epoch-millis window over a declared field's own value
+          // space. `externalId` above declares none (the server default).
+          .map((l) => ({
+            fieldName: l.fieldName,
+            rangeEnabled: l.rangeEnabled === true,
+            sortBy: l.sortBy,
+          })),
       ]
     : [];
 
@@ -406,8 +420,13 @@ export function DocumentsPage(): React.JSX.Element {
   // Best-effort non-empty pre-warning before a folder delete (D1). Sub-folders
   // are always known (the folder tree is fully loaded); child DOCUMENTS are only
   // visible when the list isn't scoped to a different folder (server-side
-  // scoping). The backend's 400 on a non-empty folder is the authoritative
-  // guard either way (handled in the dialog's error branch).
+  // scoping). Child RECORDS are never visible here — this page does not list
+  // records — yet the server counts them when it decides a folder is non-empty,
+  // so a folder holding only records shows NO pre-warning and is then refused.
+  // The server also counts rows the caller cannot read, so the warning can be
+  // absent (or the refusal unexplainable) for a narrowly scoped credential.
+  // The backend's 400 on a non-empty folder is the authoritative guard in every
+  // one of those cases (handled in the dialog's error branch).
   const canSeeTargetDocs = scopedFolderId === undefined || scopedFolderId === deleteTarget?.id;
   const deleteTargetHasContents =
     deleteTarget !== null &&
@@ -537,8 +556,10 @@ export function DocumentsPage(): React.JSX.Element {
 
           {/* Server-side lookup — typed view only (the lookup endpoint requires
               a document type). `externalId` is always offered; the schema's
-              lookup fields add range/prefix where enabled. Keyed on the type so
-              the panel's inputs reset when the type changes. */}
+              lookup fields add range/prefix where enabled; a fully-specified
+              exact match can be narrowed further by the sort key's own range
+              (`supportsSortWindow`). Keyed on the type so the panel's inputs
+              reset when the type changes. */}
           {activeSchema && (
             <LookupPanel
               key={activeSchema.typeName}
@@ -547,6 +568,7 @@ export function DocumentsPage(): React.JSX.Element {
               onApply={setAppliedLookup}
               messagePrefix="documents"
               idPrefix="documents-lookup"
+              supportsSortWindow
             />
           )}
 

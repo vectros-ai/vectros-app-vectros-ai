@@ -149,3 +149,91 @@ export function validateScopeFilter(raw: string): ScopeNamespaceError | null {
   if (!isValidScopeValue(entry.value)) return { code: 'grammar' };
   return validateScopeNamespace(entry.namespace);
 }
+
+/**
+ * The most `namespace:value` entries `/v1/search` and `/v1/rag` accept in one
+ * `scopeFilters` array. Mirrors the API's own cap so an over-long filter is
+ * flagged in the box rather than as a 400. NOTE this is a different limit from
+ * {@link MAX_SCOPE_NAMESPACES}, which bounds how many scopes ONE ITEM may
+ * carry — a query may narrow by more dimensions than a single item holds.
+ */
+export const MAX_SCOPE_FILTERS = 16;
+
+/** Why a multi-dimension ownership filter string isn't usable. */
+export type ScopeFiltersError =
+  | { readonly code: 'entry'; readonly index: number; readonly raw: string }
+  | { readonly code: 'duplicate'; readonly namespace: string }
+  | { readonly code: 'tooMany'; readonly max: number };
+
+/**
+ * Split a comma-separated ownership filter into its trimmed entries, dropping
+ * blank ones (so a trailing comma mid-typing isn't an error).
+ *
+ * Each entry is TRIMMED here, at the parse, and it is the trimmed entry that
+ * both {@link validateScopeFilters} checks and {@link scopeFiltersParam} sends
+ * — keeping the validated string and the sent string the same one, which is the
+ * rule {@link validateScopeFilter} above documents the hard way.
+ */
+export function splitScopeFilters(raw: string): string[] {
+  return raw
+    .split(',')
+    .map((e) => e.trim())
+    .filter((e) => e !== '');
+}
+
+/**
+ * Validate a multi-dimension ownership filter (`org:<id>, client:<id>`).
+ * Returns null when savable. Enforces exactly what the API does: every entry a
+ * well-formed `namespace:value`, each namespace named at most once, and at most
+ * {@link MAX_SCOPE_FILTERS} entries.
+ */
+export function validateScopeFilters(raw: string): ScopeFiltersError | null {
+  const entries = splitScopeFilters(raw);
+  const seen = new Set<string>();
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i] as string;
+    if (validateScopeFilter(entry) !== null) return { code: 'entry', index: i, raw: entry };
+    // Non-null: validateScopeFilter already accepted the grammar.
+    const ns = (parseScopeEntry(entry) as ScopeEntry).namespace;
+    if (seen.has(ns)) return { code: 'duplicate', namespace: ns };
+    seen.add(ns);
+  }
+  if (entries.length > MAX_SCOPE_FILTERS) {
+    return { code: 'tooMany', max: MAX_SCOPE_FILTERS };
+  }
+  return null;
+}
+
+/**
+ * The validated entries for a multi-dimension filter, or undefined when the
+ * filter is empty or not yet usable.
+ *
+ * The CALLER decides which wire field to use: `/v1/search` and `/v1/rag` treat
+ * `scope` and `scopeFilters` as mutually exclusive (sending both is a 400), so
+ * send `scope` for a single entry and `scopeFilters` for more than one.
+ */
+export function scopeFiltersParam(raw: string): string[] | undefined {
+  if (validateScopeFilters(raw) !== null) return undefined;
+  const entries = splitScopeFilters(raw);
+  return entries.length > 0 ? entries : undefined;
+}
+
+/**
+ * The ownership arguments for a `/v1/search` or `/v1/rag` request built from a
+ * multi-dimension filter box: `{ scope }` for exactly one dimension,
+ * `{ scopeFilters }` for more than one, and `{}` when the filter is empty or
+ * not yet usable.
+ *
+ * The two fields are MUTUALLY EXCLUSIVE server-side — sending both is a 400 —
+ * so choosing between them belongs in one place rather than at each call site.
+ * Spread the result into the request; it never emits a key with an `undefined`
+ * value, which `exactOptionalPropertyTypes` would reject.
+ */
+export function ownershipScopeQueryArgs(
+  raw: string,
+): { scope: string } | { scopeFilters: string[] } | Record<string, never> {
+  const entries = scopeFiltersParam(raw);
+  if (!entries || entries.length === 0) return {};
+  if (entries.length === 1) return { scope: entries[0] as string };
+  return { scopeFilters: entries };
+}

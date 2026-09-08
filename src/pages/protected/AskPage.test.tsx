@@ -37,7 +37,7 @@ const OWNER: TenantMembership = {
 async function* ragStream(): AsyncGenerator<unknown> {
   yield {
     event: 'search_results',
-    results: [{ documentId: 'doc_42', score: 0.91, snippet: 'Relevant passage.' }],
+    results: [{ documentId: 'doc_42', score: 0.0328, snippet: 'Relevant passage.' }],
     totalResults: 1,
     searchTimeMs: 17,
   };
@@ -73,7 +73,9 @@ function renderPage(path = '/ai/ask'): void {
     <TestProviders initialEntries={[path]}>
       <CurrentTenantProvider initialMemberships={[OWNER]} initialTenant={TENANT}>
         <CurrentContextProvider
-          initialContexts={[{ contextId: 'default', name: 'Default', tenantId: TENANT, tenantKind: 'test' }]}
+          initialContexts={[
+            { contextId: 'default', name: 'Default', tenantId: TENANT, tenantKind: 'test' },
+          ]}
           initialContext="default"
         >
           <AskPage />
@@ -112,7 +114,15 @@ describe('AskPage', () => {
 
     // Citation rendered as a non-linked snippet (id + score), not a link.
     expect(screen.getByText(/Relevant passage\./)).toBeInTheDocument();
-    expect(screen.getByText(/doc_42 · 0\.91/)).toBeInTheDocument();
+    // Retrieval defaults to HYBRID, where `score` is a Reciprocal Rank Fusion
+    // value (~0.016 on one leg, ~0.033 on both) — NOT a 0-1 confidence. Three
+    // decimals because two collapse that whole range onto 0.02/0.03, and the
+    // number carries a tooltip saying so rather than standing bare.
+    expect(screen.getByText(/doc_42/)).toBeInTheDocument();
+    const score = screen.getByText('0.033');
+    expect(score).toBeInTheDocument();
+    await user.hover(score);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/Reciprocal Rank Fusion/);
     expect(screen.queryByRole('link', { name: /doc_42/ })).not.toBeInTheDocument();
     expect(screen.getByText(/aren't click-through yet/i)).toBeInTheDocument();
 
@@ -147,6 +157,26 @@ describe('AskPage', () => {
     await waitFor(() => expect(ragInference).toHaveBeenCalled());
     const req = ragInference.mock.calls[0]?.[0] as { search?: { scope?: string } };
     expect(req.search?.scope).toBeUndefined();
+  });
+
+  // `/v1/rag`'s retrieval takes the same ownership pair as `/v1/search` (SDK
+  // 0.43.0): `scope` for one dimension, `scopeFilters` for more, never both.
+  it('sends two owner dimensions into the RAG retrieval as `search.scopeFilters`', async () => {
+    const user = userEvent.setup();
+    const ragInference = stubRag(() => Promise.resolve(ragStream()));
+    renderPage();
+
+    await user.type(
+      screen.getByRole('textbox', { name: /owner scope/i }),
+      'org:acme, client:pilot',
+    );
+    await user.type(screen.getByRole('textbox', { name: /ask a question/i }), 'Q');
+    await user.click(screen.getByRole('button', { name: 'Ask' }));
+
+    await waitFor(() => expect(ragInference).toHaveBeenCalled());
+    const req = ragInference.mock.calls[0]?.[0] as { search?: Record<string, unknown> };
+    expect(req.search?.['scopeFilters']).toEqual(['org:acme', 'client:pilot']);
+    expect(Object.keys(req.search ?? {})).not.toContain('scope');
   });
 
   it('shows a no-sources note when the answer has no citations', async () => {
@@ -203,6 +233,49 @@ describe('AskPage', () => {
       expect(screen.getByText(/trimmed to fit the context window/i)).toBeInTheDocument(),
     );
     expect(screen.getByText(/6 of 10 used/i)).toBeInTheDocument();
+  });
+
+  // A retrieval result is dropped for two INDEPENDENT reasons: it did not fit
+  // the context window, or it had no groundable text at all. The notice used to
+  // assert the budget cause unconditionally, which sends someone hitting the
+  // second case after a remedy that does not exist. `reason` is a closed set
+  // server-side but typed as a plain string, so an unknown value must degrade
+  // to a cause-neutral notice rather than to whichever cause is listed first.
+  it.each([
+    ['no_groundable_content', /no usable text to ground the answer/i],
+    ['context_window_budget_and_no_content', /trimmed to fit the context window, and others/i],
+    ['something_new_the_server_added', /were not used in the answer/i],
+  ])('reports the truncation cause for reason=%s', async (reason, expected) => {
+    const user = userEvent.setup();
+    stubRag(() =>
+      Promise.resolve(
+        (async function* () {
+          yield {
+            event: 'truncation_warning',
+            resultsRequested: 10,
+            resultsUsed: 6,
+            reason,
+          };
+          yield { event: 'content_delta', delta: 'Answer.' };
+          yield {
+            event: 'done',
+            inputTokens: 1,
+            outputTokens: 1,
+            model: 'haiku',
+            platformCreditsCharged: 0,
+            inferenceBalanceCentsCharged: 0,
+          };
+        })(),
+      ),
+    );
+    renderPage();
+    await user.type(screen.getByRole('textbox', { name: /ask a question/i }), 'Q');
+    await user.click(screen.getByRole('button', { name: 'Ask' }));
+    await waitFor(() => expect(screen.getByText(expected)).toBeInTheDocument());
+    // The budget wording must NOT appear for the no-content-only case.
+    if (reason === 'no_groundable_content') {
+      expect(screen.queryByText(/trimmed to fit the context window/i)).not.toBeInTheDocument();
+    }
   });
 
   it('surfaces a RAG error', async () => {

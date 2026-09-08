@@ -318,8 +318,8 @@ describe('LookupPanel — sortFrom/sortTo (sort-key window)', () => {
 
   it('never offers the window when the caller has not opted in', async () => {
     const user = userEvent.setup();
-    // supportsSortWindow defaults false — Documents' lookup request has no
-    // such field at all, so a caller that never opts in must never see it.
+    // supportsSortWindow defaults false: the opt-in, not the endpoint, is
+    // what gates the window, so a caller that never opts in must never see it.
     renderPanel([PLAIN], vi.fn());
 
     await user.click(screen.getByRole('combobox', { name: 'Look up by' }));
@@ -340,18 +340,43 @@ describe('LookupPanel — sortFrom/sortTo (sort-key window)', () => {
     expect(screen.queryByRole('textbox', { name: 'Sort from' })).not.toBeInTheDocument();
   });
 
-  it('never offers the window for range or prefix mode, only exact', async () => {
+  // A RANGE-ENABLED field never offers the window, in ANY mode — not merely in
+  // range/prefix mode. Such a field is stored as an ordered row rather than in a
+  // fast lookup slot, so it has no sort key to narrow, and the server refuses
+  // `sortFrom`/`sortTo` on one outright ("declared rangeEnabled ... so it has no
+  // sort key to narrow") on records and documents alike.
+  //
+  // This cell previously asserted the OPPOSITE for the default mode ("Default
+  // mode is exact — window present"), i.e. it pinned the defect: mode defaults
+  // to exact, so the window rendered and every submission was a guaranteed 400.
+  it('never offers the window for a range-enabled field, in any mode', async () => {
     const user = userEvent.setup();
     renderPanel([PLAIN_RANGE], vi.fn(), { supportsSortWindow: true });
 
     await user.click(screen.getByRole('combobox', { name: 'Look up by' }));
     await user.click(await screen.findByRole('option', { name: /code/ }));
-    // Default mode is exact — window present.
-    expect(await screen.findByRole('textbox', { name: 'Sort from' })).toBeInTheDocument();
+    // Exact is the default mode, and it is the case that used to leak.
+    expect(screen.queryByRole('textbox', { name: 'Sort from' })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('combobox', { name: 'Match' }));
     await user.click(await screen.findByRole('option', { name: 'Range' }));
     expect(screen.queryByRole('textbox', { name: 'Sort from' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('combobox', { name: 'Match' }));
+    await user.click(await screen.findByRole('option', { name: 'Prefix' }));
+    expect(screen.queryByRole('textbox', { name: 'Sort from' })).not.toBeInTheDocument();
+  });
+
+  // The control for the cell above: a field that is NOT range-enabled still gets
+  // the window in exact mode, so the new term is about `rangeEnabled` and has
+  // not simply switched the feature off.
+  it('still offers the window for a non-range-enabled field in exact mode', async () => {
+    const user = userEvent.setup();
+    renderPanel([PLAIN], vi.fn(), { supportsSortWindow: true });
+
+    await user.click(screen.getByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: 'owner' }));
+    expect(await screen.findByRole('textbox', { name: 'Sort from' })).toBeInTheDocument();
   });
 
   it('offers the window for a composite only once every leg is filled (full-tuple sort continuity)', async () => {

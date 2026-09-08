@@ -47,7 +47,9 @@ function renderPage(): void {
     <TestProviders>
       <CurrentTenantProvider initialMemberships={[OWNER]} initialTenant={TENANT}>
         <CurrentContextProvider
-          initialContexts={[{ contextId: 'default', name: 'Default', tenantId: TENANT, tenantKind: 'test' }]}
+          initialContexts={[
+            { contextId: 'default', name: 'Default', tenantId: TENANT, tenantKind: 'test' },
+          ]}
           initialContext="default"
         >
           <SearchPage />
@@ -74,9 +76,7 @@ describe('SearchPage', () => {
 
     renderPage();
 
-    expect(
-      await screen.findByText(/couldn't load this context's folders/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/couldn't load this context's folders/i)).toBeInTheDocument();
     // Documents the consequence rather than guarding it: the pre-existing
     // `folders.length > 0` gate hides the picker on an empty list too, so this
     // holds with or without the fix. The `findByText` is what has the power.
@@ -130,6 +130,51 @@ describe('SearchPage', () => {
     );
   });
 
+  // `/v1/search` narrows by more than one ownership dimension via `scopeFilters`
+  // (SDK 0.43.0). It is MUTUALLY EXCLUSIVE with `scope` — sending both is a 400 —
+  // so the two-dimension case must send `scopeFilters` and no `scope` at all.
+  it('sends two owner dimensions as `scopeFilters`, and never alongside `scope`', async () => {
+    const user = userEvent.setup();
+    const content = vi.fn().mockResolvedValue({ results: [] });
+    stub({ content });
+    renderPage();
+    await user.type(
+      screen.getByRole('textbox', { name: /owner scope/i }),
+      'org:acme, client:pilot',
+    );
+    await runSearch('hello');
+
+    await vi.waitFor(() =>
+      expect(content).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          query: 'hello',
+          scopeFilters: ['org:acme', 'client:pilot'],
+        }),
+      ),
+    );
+    const last = content.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(Object.keys(last)).not.toContain('scope');
+  });
+
+  // Each namespace may be named at most once — the API rejects a repeat, so the
+  // box must not fire the request at all.
+  it('never sends a filter naming one namespace twice', async () => {
+    const user = userEvent.setup();
+    const content = vi.fn().mockResolvedValue({ results: [] });
+    stub({ content });
+    renderPage();
+    await user.type(screen.getByRole('textbox', { name: /owner scope/i }), 'org:a, org:b');
+    await runSearch('hello');
+
+    await vi.waitFor(() => expect(content).toHaveBeenCalled());
+    expect(
+      content.mock.calls.every(([arg]) => {
+        const a = arg as Record<string, unknown>;
+        return a['scopeFilters'] === undefined && a['scope'] === undefined;
+      }),
+    ).toBe(true);
+  });
+
   it('uses the item title from metadata as the result heading', async () => {
     stub({
       content: vi.fn().mockResolvedValue({
@@ -161,6 +206,34 @@ describe('SearchPage', () => {
     await runSearch('hello');
 
     expect(await screen.findByText('92%')).toBeInTheDocument();
+  });
+
+  // `createdAt` on a search HIT is when the item entered the search index, not
+  // when the source item was created. Rendered bare it reads as the latter, so
+  // it carries an "Indexed" label and a tooltip. Without this cell the entire
+  // relabel could be reverted and every other SearchPage test would stay green.
+  it('labels a hit date as the INDEX time, with a tooltip saying so', async () => {
+    const user = userEvent.setup();
+    stub({
+      content: vi.fn().mockResolvedValue({
+        results: [
+          {
+            documentId: 'doc_1',
+            sourceType: 'PartnerDocument',
+            createdAt: '2026-03-04T05:06:07.000Z',
+          },
+        ],
+      }),
+    });
+
+    renderPage();
+    await runSearch('hello');
+
+    const labeled = await screen.findByText(/Indexed\s+Mar\s+4,\s+2026/);
+    expect(labeled).toBeInTheDocument();
+
+    await user.hover(labeled);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/entered the search index/i);
   });
 
   it('shows an empty state when there are no matches', async () => {
@@ -250,7 +323,10 @@ describe('SearchPage', () => {
   it('offers the type filter on the default source and scopes both content types', async () => {
     const user = userEvent.setup();
     const content = vi.fn().mockResolvedValue({ results: [] });
-    stub({ content, schemas: vi.fn().mockResolvedValue(pageOf([{ id: 's1', typeName: 'patient' }])) });
+    stub({
+      content,
+      schemas: vi.fn().mockResolvedValue(pageOf([{ id: 's1', typeName: 'patient' }])),
+    });
     renderPage();
 
     // SDK 0.30.0: `typeName` scopes documents and records alike, so the type
@@ -269,7 +345,10 @@ describe('SearchPage', () => {
   it('scopes the type filter to documents when the source is Documents', async () => {
     const user = userEvent.setup();
     const content = vi.fn().mockResolvedValue({ results: [] });
-    stub({ content, schemas: vi.fn().mockResolvedValue(pageOf([{ id: 's1', typeName: 'patient' }])) });
+    stub({
+      content,
+      schemas: vi.fn().mockResolvedValue(pageOf([{ id: 's1', typeName: 'patient' }])),
+    });
     renderPage();
 
     await user.click(screen.getByRole('combobox', { name: /source/i }));
@@ -288,7 +367,10 @@ describe('SearchPage', () => {
   it('scopes the type filter to records when the source is Records', async () => {
     const user = userEvent.setup();
     const content = vi.fn().mockResolvedValue({ results: [] });
-    stub({ content, schemas: vi.fn().mockResolvedValue(pageOf([{ id: 's1', typeName: 'patient' }])) });
+    stub({
+      content,
+      schemas: vi.fn().mockResolvedValue(pageOf([{ id: 's1', typeName: 'patient' }])),
+    });
     renderPage();
 
     await user.click(screen.getByRole('combobox', { name: /source/i }));
@@ -307,7 +389,10 @@ describe('SearchPage', () => {
   it('keeps the selected type when the source changes, re-scoping contentTypes', async () => {
     const user = userEvent.setup();
     const content = vi.fn().mockResolvedValue({ results: [] });
-    stub({ content, schemas: vi.fn().mockResolvedValue(pageOf([{ id: 's1', typeName: 'patient' }])) });
+    stub({
+      content,
+      schemas: vi.fn().mockResolvedValue(pageOf([{ id: 's1', typeName: 'patient' }])),
+    });
     renderPage();
 
     // Pick a type while the source is Records...

@@ -399,8 +399,8 @@ export function RecordsPage(): React.JSX.Element {
               (grouped by the legs left blank — the note below); `order` sets
               the server's sort direction; a FULLY-specified exact/composite
               match can also be narrowed by the sort key's own range
-              (`supportsSortWindow` — records' lookup accepts it, documents'
-              doesn't). Keyed on the type so its inputs reset when the type
+              (`supportsSortWindow` — the records and documents lookups both
+              accept it). Keyed on the type so its inputs reset when the type
               changes. */}
           <LookupPanel
             key={effectiveType ?? ''}

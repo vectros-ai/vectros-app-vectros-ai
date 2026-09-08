@@ -181,6 +181,18 @@ export function DocumentDetailPage(): React.JSX.Element {
   // externalId), and uploading new bytes re-extracts + re-indexes it. Only
   // possible when the document was created WITH an externalId — that key IS
   // the re-upload identity, so a document without one has no replace path.
+  //
+  // Compensation here is NARROWER than the add-document dialog's, and the
+  // difference is the whole point. Usually this mints nothing: the externalId
+  // matches, the API re-issues a URL to the document that already exists, and a
+  // failed PUT leaves its stored file and extracted text alone — so deleting
+  // would destroy a document the user already had. But the match is a lookup,
+  // not a guarantee: if it MISSES (the document was deleted in another tab, or
+  // its type binding moved) the API falls through and creates a BRAND NEW
+  // document, which a failed PUT then strands exactly like the dialog's case.
+  // So compensate on `created === true` and nothing else — the API's own
+  // statement that this call, not an earlier one, brought the document into
+  // existence.
   const replaceMutation = useMutation({
     mutationFn: async (file: File) => {
       if (!doc?.externalId) throw new Error('document has no externalId');
@@ -200,16 +212,30 @@ export function DocumentDetailPage(): React.JSX.Element {
         // (instead of falling through to a fresh, schemaless create).
         ...(doc.schemaId ? { schemaId: doc.schemaId } : {}),
       });
-      if (!issued.uploadUrl) throw new Error('upload did not return a presigned URL');
-      // PUT the raw bytes straight to S3 — the presigned URL is self-
-      // authenticating, so NO Authorization header (one would break the
-      // signature). Content-Type must match the fileType we declared.
-      const put = await fetch(issued.uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': fileType },
-        body: file,
-      });
-      if (!put.ok) throw new Error(`file upload failed: ${put.status}`);
+      try {
+        if (!issued.uploadUrl) throw new Error('upload did not return a presigned URL');
+        // PUT the raw bytes straight to S3 — the presigned URL is self-
+        // authenticating, so NO Authorization header (one would break the
+        // signature). Content-Type must match the fileType we declared.
+        const put = await fetch(issued.uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Type': fileType },
+          body: file,
+        });
+        if (!put.ok) throw new Error(`file upload failed: ${put.status}`);
+      } catch (replaceError) {
+        // Only when the externalId lookup MISSED and this call minted a new
+        // document (see the header). On the ordinary match `created` is false and
+        // the document — the one this page is showing — is left strictly alone.
+        if (issued.created === true && issued.id) {
+          try {
+            await client.documents.deleteDocument({ id: issued.id });
+          } catch {
+            // Best effort; the replace error is the one worth reporting.
+          }
+        }
+        throw replaceError;
+      }
     },
     onSuccess: () => {
       // Extraction/re-indexing is asynchronous — the refreshed document shows

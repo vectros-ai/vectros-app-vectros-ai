@@ -5,6 +5,11 @@
 //   - Upload a file: uploadDocument() returns a presigned S3 PUT URL; we PUT the
 //     raw bytes straight to it (no Authorization header — the URL is self-
 //     authenticating). The document then indexes asynchronously (PENDING_INDEX).
+//     The two steps are not one transaction, so a failed PUT compensates: the
+//     document this call created is deleted again (best effort) rather than left
+//     behind with no file in it. A document merely MATCHED by externalId is never
+//     deleted — it predates the call, and the response carries no way to tell a
+//     real one from an earlier failure's leftover.
 //   - Ingest text: ingestDocument() stores supplied text directly.
 //
 // Both place the document in the selected folder (or the context's default root)
@@ -212,16 +217,53 @@ export function AddDocumentDialog({
           ...folderPart,
           ...externalIdPart,
         });
-        if (!created.uploadUrl) throw new Error('upload did not return a presigned URL');
-        // PUT the raw bytes straight to S3 — the presigned URL is self-
-        // authenticating, so NO Authorization header (one would break the
-        // signature). Content-Type must match the fileType we declared.
-        const put = await fetch(created.uploadUrl, {
-          method: 'PUT',
-          headers: { 'Content-Type': fileType },
-          body: file,
-        });
-        if (!put.ok) throw new Error(`file upload failed: ${put.status}`);
+        // A document row EXISTS from here on, so every failure below has to undo
+        // it — otherwise a failed upload leaves behind a document with no file in
+        // it: unopenable in the viewer, undownloadable, and absent from search,
+        // which the user then has to hunt down and delete by hand from its detail
+        // page. Both branches count: a missing presigned URL strands the document
+        // just as surely as a rejected PUT.
+        try {
+          if (!created.uploadUrl) throw new Error('upload did not return a presigned URL');
+          // PUT the raw bytes straight to S3 — the presigned URL is self-
+          // authenticating, so NO Authorization header (one would break the
+          // signature). Content-Type must match the fileType we declared.
+          const put = await fetch(created.uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': fileType },
+            body: file,
+          });
+          if (!put.ok) throw new Error(`file upload failed: ${put.status}`);
+        } catch (uploadError) {
+          // Compensate ONLY a document this call actually minted. A matched
+          // externalId comes back `created: false` carrying the id of a document
+          // that existed BEFORE this call — deleting that would destroy the
+          // user's own data to tidy up ours. `=== true` deliberately: an absent
+          // flag means "cannot prove we created it", which must fall on the side
+          // of keeping the document. (One case the flag cannot distinguish: a
+          // RETRY after a failed compensation matches the earlier phantom and so
+          // also reports `created: false`. Declining to delete is still right —
+          // the response carries no way to tell that phantom from a real
+          // document — but it does mean a phantom whose first cleanup failed
+          // stays until the platform's own 24h expiry reaps it.)
+          if (created.created === true && created.id) {
+            // Best effort, and deliberately a statement rather than a `.catch()`
+            // on the returned promise: a client method that throws SYNCHRONOUSLY
+            // would escape a trailing `.catch`, skip the rethrow below, and
+            // replace the upload error the user actually needs with a cleanup one.
+            try {
+              await client.documents.deleteDocument({ id: created.id });
+            } catch {
+              // Nothing to do — a credential may hold documents:c and not
+              // documents:d, and the original error is the one that matters.
+            }
+          }
+          // NOTE: a `fetch` that REJECTS (network drop, missing CORS header) can
+          // still have transmitted the body, so S3 may hold the object. This path
+          // then deletes a document whose bytes did in fact land. The client
+          // cannot tell the two apart, and leaving a phantom is the worse default.
+          throw uploadError;
+        }
         // A matched externalId (created:false) still replaced the file and
         // re-indexes — a real write either way, so no special outcome here.
         return { ingestReturnedExisting: false };
