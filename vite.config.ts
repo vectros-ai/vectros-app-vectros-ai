@@ -54,8 +54,8 @@ function versionManifest(): Plugin {
 // ---------------------------------------------------------------------------
 // Vite + Vitest configuration for app.vectros.ai (the data-plane suite).
 //
-// Dev server pinned to port 3002 so it coexists with ui/developer-portal
-// (3000) and ui/admin-app (3001) during local dev. `strictPort: true` makes a
+// Dev server pinned to port 3002 so it coexists with the developer portal
+// (3000) and the Vectros Admin App (3001) during local dev. `strictPort: true` makes a
 // port collision a hard failure (instead of silently incrementing) so a
 // developer notices + fixes it rather than launching against an unexpected URL
 // the Cognito allow-list hasn't been updated for.

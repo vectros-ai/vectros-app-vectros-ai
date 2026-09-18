@@ -449,6 +449,115 @@ describe('DocumentsPage', () => {
     );
   });
 
+  it('running the SAME lookup again issues a new request instead of serving the cache', async () => {
+    // The lookup query is keyed on the applied lookup, so re-running it
+    // unchanged changes no key: without an explicit refetch the cached rows
+    // would be served however often "Look up" is pressed.
+    const user = userEvent.setup();
+    const lookupDocumentsByBody = vi
+      .fn()
+      .mockResolvedValueOnce(pageOf([]))
+      .mockResolvedValue(
+        pageOf([
+          {
+            id: 'doc_new',
+            title: 'arrived-later.md',
+            status: 'ACTIVE',
+            indexStatus: 'INDEXED',
+            schemaId: 's_dec',
+            externalId: 'dec-9',
+          },
+        ]),
+      );
+    stub({
+      folders: vi.fn().mockResolvedValue(pageOf([])),
+      schemas: vi.fn().mockResolvedValue(pageOf([DECISION_SCHEMA])),
+      documents: vi.fn().mockResolvedValue(pageOf(TYPED_DOCS)),
+      lookupDocumentsByBody,
+    });
+    renderPage(['/?type=decision']);
+
+    await user.click(await screen.findByRole('combobox', { name: /look up by/i }));
+    await user.click(await screen.findByRole('option', { name: 'externalId' }));
+    await user.type(screen.getByRole('textbox', { name: 'Value' }), 'dec-9');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(lookupDocumentsByBody).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(lookupDocumentsByBody).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('link', { name: 'arrived-later.md' })).toBeInTheDocument();
+  });
+
+  it('a CHANGED lookup value runs that value rather than re-running the old lookup', async () => {
+    const user = userEvent.setup();
+    const lookupDocumentsByBody = vi.fn().mockResolvedValue(pageOf([]));
+    stub({
+      folders: vi.fn().mockResolvedValue(pageOf([])),
+      schemas: vi.fn().mockResolvedValue(pageOf([DECISION_SCHEMA])),
+      documents: vi.fn().mockResolvedValue(pageOf(TYPED_DOCS)),
+      lookupDocumentsByBody,
+    });
+    renderPage(['/?type=decision']);
+
+    await user.click(await screen.findByRole('combobox', { name: /look up by/i }));
+    await user.click(await screen.findByRole('option', { name: 'externalId' }));
+    const valueBox = screen.getByRole('textbox', { name: 'Value' });
+    await user.type(valueBox, 'dec-1');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(lookupDocumentsByBody).toHaveBeenCalledTimes(1));
+
+    await user.type(valueBox, '0'); // now "dec-10"
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(lookupDocumentsByBody).toHaveBeenCalledTimes(2));
+    expect(lookupDocumentsByBody).toHaveBeenLastCalledWith(
+      expect.objectContaining({ field: 'externalId', value: 'dec-10' }),
+    );
+  });
+
+  it('does not send a duplicate lookup when "Look up" is pressed again while a re-run is in flight', async () => {
+    const user = userEvent.setup();
+    let resolveRerun: (value: unknown) => void = () => {};
+    const lookupDocumentsByBody = vi
+      .fn()
+      .mockResolvedValueOnce(pageOf([]))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRerun = resolve; }))
+      .mockResolvedValue(pageOf([]));
+    stub({
+      folders: vi.fn().mockResolvedValue(pageOf([])),
+      schemas: vi.fn().mockResolvedValue(pageOf([DECISION_SCHEMA])),
+      documents: vi.fn().mockResolvedValue(pageOf(TYPED_DOCS)),
+      lookupDocumentsByBody,
+    });
+    renderPage(['/?type=decision']);
+
+    await user.click(await screen.findByRole('combobox', { name: /look up by/i }));
+    await user.click(await screen.findByRole('option', { name: 'externalId' }));
+    await user.type(screen.getByRole('textbox', { name: 'Value' }), 'dec-9');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(lookupDocumentsByBody).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole('button', { name: 'Look up' })); // re-run, stays in flight
+    await waitFor(() => expect(lookupDocumentsByBody).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole('button', { name: 'Look up' })); // must NOT restart it
+    await new Promise((r) => setTimeout(r, 50));
+    expect(lookupDocumentsByBody).toHaveBeenCalledTimes(2);
+
+    resolveRerun(
+      pageOf([
+        {
+          id: 'doc_late',
+          title: 'arrived-late.md',
+          status: 'ACTIVE',
+          indexStatus: 'INDEXED',
+          schemaId: 's_dec',
+          externalId: 'dec-9',
+        },
+      ]),
+    );
+    expect(await screen.findByRole('link', { name: 'arrived-late.md' })).toBeInTheDocument();
+    expect(lookupDocumentsByBody).toHaveBeenCalledTimes(2);
+  });
+
   // The sort window (`sortFrom`/`sortTo`) narrows an exact match by the lookup
   // field's SORT key. `DocumentLookupRequest` has accepted the pair since the
   // API added it; this page withheld the opt-in on the mistaken premise that

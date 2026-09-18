@@ -70,6 +70,7 @@ import type { FolderResponse } from '../api/vectrosApi';
 import { dataQueryKeys } from '../lib/dataQueryKeys';
 import { formatBytes } from '../lib/formatBytes';
 import { listAllSchemas } from '../lib/listAllSchemas';
+import { presignedUploadHeaders } from '../lib/presignedUpload';
 import { MAX_UPLOAD_BYTES } from '../lib/uploadLimits';
 import { folderMenuItems } from './folderMenuItems';
 import { OwnershipScopeField } from './OwnershipScopeField';
@@ -227,10 +228,11 @@ export function AddDocumentDialog({
           if (!created.uploadUrl) throw new Error('upload did not return a presigned URL');
           // PUT the raw bytes straight to S3 — the presigned URL is self-
           // authenticating, so NO Authorization header (one would break the
-          // signature). Content-Type must match the fileType we declared.
+          // signature). Content-Type must match the fileType we declared, and
+          // any header the response requires is part of the signature too.
           const put = await fetch(created.uploadUrl, {
             method: 'PUT',
-            headers: { 'Content-Type': fileType },
+            headers: { 'Content-Type': fileType, ...presignedUploadHeaders(created) },
             body: file,
           });
           if (!put.ok) throw new Error(`file upload failed: ${put.status}`);

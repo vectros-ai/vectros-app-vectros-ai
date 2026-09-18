@@ -3,6 +3,68 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.19.1 — 2026-09-17
+
+### Fixed
+
+- **Removed a stale, unused reference to org/client as "built-in" namespaces.** org and client are
+  ordinary registrations (not built-ins); the constant this app never actually consumed, and the
+  comments describing it that way, are gone. No behavioral change — this app has no namespace
+  registry client and never gated on the constant.
+- **Uploading or replacing a document's file now works against an API that makes presigned upload
+  URLs single-use.**
+  Such an API bakes a conditional-write header into the upload URL's signature and names it in the
+  upload response (`requiredHeaderName` / `requiredHeaderValue`); a PUT without that header is
+  rejected by storage with a 403. The app now sends whatever header the response names, and no
+  extra header when the response names none, so it works against API versions on either side of
+  the change.
+- **File upload and file replace were completely broken when this app is deployed behind
+  CloudFront.** The browser's own Content-Security-Policy blocked the upload PUT outright, before
+  it ever reached the network, because the deployed policy's `connect-src` allowed only the host
+  used to fetch a document back down, not the (different) host the upload PUT targets. Every
+  upload and replace failed with a generic "please check your input and try again," regardless of
+  file, network, or account. The policy now allows the upload's host too, alongside the existing
+  download one.
+- **Running a search again with an unchanged query now re-runs it.** Search served the previous
+  result from cache and sent no request, so an item indexed a few seconds after the first search
+  stayed missing however often the search was repeated. It now searches again, starting from the
+  first page, so a search with several pages loaded is not re-issued once per loaded page. Search
+  also gains a "Refresh results" button on its results, empty, and error states, which does the
+  same. Going back to an earlier search, or the network reconnecting, no longer re-issues every
+  page that search had loaded either: going back runs its first page once, and a reconnect runs
+  nothing.
+- **Typing an owner scope on Search no longer runs a search per keystroke.** After a search had
+  run, each keystroke that formed a valid entry (`org:a`, `org:ac`, and so on) started another
+  search, and every search is billed. The owner scope is now applied once it stops changing, or at
+  once when you press Search, and a value that means the same as the one already applied runs
+  nothing.
+- **Pressing "Look up" again with an unchanged lookup now re-runs it** on the Records and Documents
+  explorers, instead of serving the cached result. Their Refresh buttons already re-ran the lookup;
+  only "Look up" did not.
+- **Four source comments and the README's project-layout diagram carried repo-relative internal
+  paths** (a sibling reference app's monorepo-relative path in four places, and the README's tree
+  root labeled with this app's own monorepo-relative path) that resolve to nothing in this app's
+  own public mirror — the mirrored tree root IS the app, so a path prefixed with the monorepo
+  location is a broken link there even before considering it as an internal reference. Reworded
+  all to state the same guidance without the monorepo-relative prefix; no behavioral change.
+
+- **One more internal path, found on a later sweep**: `.env.example`'s comment on the shared
+  Cognito pool named a sibling internal tool by monorepo-relative path — that tool isn't
+  source-mirrored at all, so the path is a broken/leaking reference either way.
+  Reworded to name it descriptively. No behavioral change.
+
+- **A second, separate leak in the same file, found by a post-merge audit**: `.env.example`'s
+  setup instructions named this app's own build/deploy config by monorepo-relative path (a CFN
+  template and a CI deploy-pipeline file), neither of which is source-mirrored — the paths were
+  dangling in the public repo regardless. Reworded to describe the mechanism without the paths,
+  matching the wording already used for the equivalent instructions in the admin reference app's
+  own `.env.example`. No behavioral change.
+
+### Changed
+
+- **Repinned to `@vectros-ai/sdk` 0.44.0.** No API surface this app uses changed shape beyond the
+  presigned-upload fix already noted above.
+
 ## 0.19.0 — 2026-09-07
 
 ### Added
@@ -164,7 +226,7 @@ This project adheres to [Semantic Versioning](https://semver.org).
   reads `getActivePartnerUserId`/`listAppContexts` from `useCurrentTenant()` instead of `useAuth()`.
   No user-visible behavior change.
 - **Repinned to `@vectros-ai/sdk` 0.40.0.** No API surface this app uses changed shape — this app has
-  no usage/billing display (see `ui/admin-app` for that), doesn't call `/v1/auth/token/exchange`
+  no usage/billing display (the admin reference app has that), doesn't call `/v1/auth/token/exchange`
   (Cognito-only), and has no error-code/message branching touched by this release's changes; see the
   [SDK changelog](https://github.com/vectros-ai/sdk/blob/main/CHANGELOG.md) for the full release.
 

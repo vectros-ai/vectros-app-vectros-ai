@@ -6,7 +6,7 @@
 // cache from leaking across `it()` blocks.
 //
 // The defaults below are the OPINIONATED reference-app baseline (shared with
-// ui/admin-app). Partner forks can override per-query via the second argument
+// the Vectros Admin App). Partner forks can override per-query via the second argument
 // to `useQuery` / `useMutation`, or replace the client entirely.
 //
 //   - `retry: 1` — single transparent retry then bubble. Data surfaces

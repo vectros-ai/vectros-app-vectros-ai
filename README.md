@@ -130,7 +130,7 @@ our separation of concerns.
 ## Project layout
 
 ```
-ui/app-vectros-ai/
+app-vectros-ai/
 ├── public/              # Static assets served at / (favicon)
 ├── src/
 │   ├── api/             # SDK client wiring (one VectrosClient per tenant+context)

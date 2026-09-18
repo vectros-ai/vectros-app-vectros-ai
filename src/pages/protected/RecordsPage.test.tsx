@@ -452,6 +452,90 @@ describe('RecordsPage', () => {
     expect(call.from).toBeUndefined();
   });
 
+  it('running the SAME lookup again issues a new request instead of serving the cache', async () => {
+    // The lookup query is keyed on the applied lookup, so re-running it
+    // unchanged changes no key: without an explicit refetch the cached rows
+    // would be served however often "Look up" is pressed.
+    const user = userEvent.setup();
+    const lookupSpy = vi
+      .fn()
+      .mockResolvedValueOnce(pageOf([]))
+      .mockResolvedValue(
+        pageOf([{ id: 'rec_new', typeName: 'event', status: 'ACTIVE', payload: { owner: 'acme' } }]),
+      );
+    stub({
+      listSchemas: vi.fn().mockResolvedValue(pageOf([SCHEMA_WITH_LOOKUPS])),
+      listRecords: vi.fn().mockResolvedValue(pageOf([])),
+      lookupRecordsByBody: lookupSpy,
+    });
+    renderPage();
+
+    await user.click(await screen.findByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: /owner/ }));
+    await user.type(screen.getByRole('textbox', { name: 'Value' }), 'acme');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(lookupSpy).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(lookupSpy).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('link', { name: 'rec_new' })).toBeInTheDocument();
+  });
+
+  it('a CHANGED lookup value runs that value rather than re-running the old lookup', async () => {
+    const user = userEvent.setup();
+    const lookupSpy = vi.fn().mockResolvedValue(pageOf([]));
+    stub({
+      listSchemas: vi.fn().mockResolvedValue(pageOf([SCHEMA_WITH_LOOKUPS])),
+      listRecords: vi.fn().mockResolvedValue(pageOf([])),
+      lookupRecordsByBody: lookupSpy,
+    });
+    renderPage();
+
+    await user.click(await screen.findByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: /owner/ }));
+    const valueBox = screen.getByRole('textbox', { name: 'Value' });
+    await user.type(valueBox, 'acme');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(lookupSpy).toHaveBeenCalledTimes(1));
+
+    await user.type(valueBox, '2'); // now "acme2"
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(lookupSpy).toHaveBeenCalledTimes(2));
+    expect(lookupSpy).toHaveBeenLastCalledWith(expect.objectContaining({ field: 'owner', value: 'acme2' }));
+  });
+
+  it('does not send a duplicate lookup when "Look up" is pressed again while a re-run is in flight', async () => {
+    const user = userEvent.setup();
+    let resolveRerun: (value: unknown) => void = () => {};
+    const lookupSpy = vi
+      .fn()
+      .mockResolvedValueOnce(pageOf([]))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRerun = resolve; }))
+      .mockResolvedValue(pageOf([]));
+    stub({
+      listSchemas: vi.fn().mockResolvedValue(pageOf([SCHEMA_WITH_LOOKUPS])),
+      listRecords: vi.fn().mockResolvedValue(pageOf([])),
+      lookupRecordsByBody: lookupSpy,
+    });
+    renderPage();
+
+    await user.click(await screen.findByRole('combobox', { name: 'Look up by' }));
+    await user.click(await screen.findByRole('option', { name: /owner/ }));
+    await user.type(screen.getByRole('textbox', { name: 'Value' }), 'acme');
+    await user.click(screen.getByRole('button', { name: 'Look up' }));
+    await waitFor(() => expect(lookupSpy).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole('button', { name: 'Look up' })); // re-run, stays in flight
+    await waitFor(() => expect(lookupSpy).toHaveBeenCalledTimes(2));
+    await user.click(screen.getByRole('button', { name: 'Look up' })); // must NOT restart it
+    await new Promise((r) => setTimeout(r, 50));
+    expect(lookupSpy).toHaveBeenCalledTimes(2);
+
+    resolveRerun(pageOf([{ id: 'rec_late', typeName: 'event', status: 'ACTIVE', payload: { owner: 'acme' } }]));
+    expect(await screen.findByRole('link', { name: 'rec_late' })).toBeInTheDocument();
+    expect(lookupSpy).toHaveBeenCalledTimes(2);
+  });
+
   it('offers exact-only (no range/prefix) for a non-range-enabled lookup field', async () => {
     const user = userEvent.setup();
     const lookupSpy = vi.fn().mockResolvedValue(

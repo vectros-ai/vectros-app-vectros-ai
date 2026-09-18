@@ -494,6 +494,7 @@
   "search.modeSemantic": "Semantic",
   "search.prompt": "Enter a query to search the records and documents in this context.",
   "search.queryLabel": "Search",
+  "search.refresh": "Refresh results",
   "search.resultCount": "{count, plural, one {# result} other {# results}}",
   "search.scopeAll": "All",
   "search.scopeDocuments": "Documents",

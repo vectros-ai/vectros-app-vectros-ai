@@ -230,6 +230,44 @@ describe('DocumentDetailPage', () => {
       'https://s3.example/re-put',
       expect.objectContaining({ method: 'PUT', body: file }),
     );
+    // The response names no required header, so none beyond Content-Type is sent.
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({ 'Content-Type': 'application/pdf' });
+    expect(await screen.findByText(/re-indexing run in the background/i)).toBeInTheDocument();
+  });
+
+  it('sends the header the re-upload response requires on the replacement PUT', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi.fn().mockResolvedValue({
+      id: 'doc_1',
+      uploadUrl: 'https://s3.example/re-put',
+      requiredHeaderName: 'If-None-Match',
+      requiredHeaderValue: '*',
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Q1 Report',
+        status: 'ACTIVE',
+        externalId: 'q1-report',
+        fileType: 'application/pdf',
+        storeText: false,
+      }),
+      uploadDocument,
+    });
+
+    renderDetail();
+
+    const file = new File(['new bytes'], 'q1-v2.pdf', { type: 'application/pdf' });
+    await screen.findByRole('button', { name: 'Replace file' });
+    await user.upload(screen.getByLabelText('Replacement file'), file);
+
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({
+      'Content-Type': 'application/pdf',
+      'If-None-Match': '*',
+    });
     expect(await screen.findByText(/re-indexing run in the background/i)).toBeInTheDocument();
   });
 

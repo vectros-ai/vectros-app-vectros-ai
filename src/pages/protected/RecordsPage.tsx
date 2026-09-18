@@ -58,7 +58,7 @@ import {
   sortRecords,
 } from '@vectros-ai/react';
 import type { SortDirection } from '@vectros-ai/react';
-import { useQuery } from '@tanstack/react-query';
+import { hashKey, useQuery } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
@@ -126,10 +126,6 @@ export function RecordsPage(): React.JSX.Element {
   // applying (or clearing) a lookup also drops any active client sort, and
   // the sort controls stay disabled for as long as this reads non-null.
   const groupedByFields = partialCompositeGroupFields(appliedLookup);
-  const applyLookup = (lookup: AppliedLookup | null): void => {
-    setAppliedLookup(lookup);
-    setSort(null);
-  };
 
   const schemasQuery = useQuery({
     queryKey: dataQueryKeys.schemas(tenant, context),
@@ -194,13 +190,16 @@ export function RecordsPage(): React.JSX.Element {
     sortBy: l.sortBy,
   }));
 
+  // The ownership filter applies to the browse (non-lookup) path only, so it's
+  // in the key ONLY there — appending it to the lookup key would wastefully
+  // refetch identical rows. Prefix-invalidation still matches.
+  const recordsKeyFor = (lookup: AppliedLookup | null) =>
+    lookup
+      ? dataQueryKeys.recordsLookup(tenant, context, effectiveType ?? '', JSON.stringify(lookup))
+      : [...dataQueryKeys.records(tenant, context, effectiveType ?? ''), scopeParam ?? 'all'];
+  const recordsKey = recordsKeyFor(appliedLookup);
   const recordsQuery = useQuery({
-    // The ownership filter applies to the browse (non-lookup) path only, so it's
-    // in the key ONLY there — appending it to the lookup key would wastefully
-    // refetch identical rows. Prefix-invalidation still matches.
-    queryKey: appliedLookup
-      ? dataQueryKeys.recordsLookup(tenant, context, effectiveType ?? '', JSON.stringify(appliedLookup))
-      : [...dataQueryKeys.records(tenant, context, effectiveType ?? ''), scopeParam ?? 'all'],
+    queryKey: recordsKey,
     queryFn: async () => {
       const api = vectrosApiClient(tenant, context).records;
       // `{ data, nextCursor }` page envelope → first-page items.
@@ -228,6 +227,19 @@ export function RecordsPage(): React.JSX.Element {
     },
     enabled: effectiveType !== null,
   });
+
+  const applyLookup = (lookup: AppliedLookup | null): void => {
+    setSort(null);
+    // Running the same lookup again leaves the query key unchanged, so the
+    // cached rows would be served and no request issued. Refetch instead: the
+    // lookup is a single page, so this is exactly one request. Skipped while a
+    // fetch is already in flight, which would otherwise be sent twice.
+    if (lookup !== null && hashKey(recordsKeyFor(lookup)) === hashKey(recordsKey)) {
+      if (!recordsQuery.isFetching) void recordsQuery.refetch();
+      return;
+    }
+    setAppliedLookup(lookup);
+  };
 
   const records: ReadonlyArray<RecordResponse> = useMemo(
     () => recordsQuery.data ?? [],

@@ -66,6 +66,7 @@ import {
 } from '../../lib/documentLabels';
 import { formatBytes } from '../../lib/formatBytes';
 import { MAX_UPLOAD_BYTES } from '../../lib/uploadLimits';
+import { presignedUploadHeaders } from '../../lib/presignedUpload';
 import { drainPages } from '../../lib/drainPages';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import {
@@ -216,10 +217,11 @@ export function DocumentDetailPage(): React.JSX.Element {
         if (!issued.uploadUrl) throw new Error('upload did not return a presigned URL');
         // PUT the raw bytes straight to S3 — the presigned URL is self-
         // authenticating, so NO Authorization header (one would break the
-        // signature). Content-Type must match the fileType we declared.
+        // signature). Content-Type must match the fileType we declared, and
+        // any header the response requires is part of the signature too.
         const put = await fetch(issued.uploadUrl, {
           method: 'PUT',
-          headers: { 'Content-Type': fileType },
+          headers: { 'Content-Type': fileType, ...presignedUploadHeaders(issued) },
           body: file,
         });
         if (!put.ok) throw new Error(`file upload failed: ${put.status}`);

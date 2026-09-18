@@ -76,7 +76,7 @@ import {
   statusCodeOf,
 } from '@vectros-ai/react';
 import type { SortDirection } from '@vectros-ai/react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { hashKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
@@ -309,13 +309,11 @@ export function DocumentsPage(): React.JSX.Element {
   // list DRAINS pages per folder while the lookup is one page (the API max)
   // over the WHOLE context — the folder filter does not apply to it.
   const lookupActive = appliedLookup !== null && activeSchema !== undefined;
+  const lookupKeyFor = (lookup: AppliedLookup | null) =>
+    dataQueryKeys.documentsLookup(tenant, context, activeSchema?.typeName ?? '', JSON.stringify(lookup));
+  const lookupKey = lookupKeyFor(appliedLookup);
   const lookupQuery = useQuery({
-    queryKey: dataQueryKeys.documentsLookup(
-      tenant,
-      context,
-      activeSchema?.typeName ?? '',
-      JSON.stringify(appliedLookup),
-    ),
+    queryKey: lookupKey,
     queryFn: async () => {
       if (!appliedLookup || !activeSchema) return [];
       // POST-body lookup: works for exact/range/prefix uniformly and keeps a
@@ -334,6 +332,18 @@ export function DocumentsPage(): React.JSX.Element {
     },
     enabled: lookupActive,
   });
+
+  const applyLookup = (lookup: AppliedLookup | null): void => {
+    // Running the same lookup again leaves the query key unchanged, so the
+    // cached rows would be served and no request issued. Refetch instead: the
+    // lookup is a single page, so this is exactly one request. Skipped while a
+    // fetch is already in flight, which would otherwise be sent twice.
+    if (lookup !== null && hashKey(lookupKeyFor(lookup)) === hashKey(lookupKey)) {
+      if (!lookupQuery.isFetching) void lookupQuery.refetch();
+      return;
+    }
+    setAppliedLookup(lookup);
+  };
 
   // Type scoping. With a lookup applied, the server already scoped the results
   // to the type (and the folder filter does NOT apply — a lookup runs over the
@@ -565,7 +575,7 @@ export function DocumentsPage(): React.JSX.Element {
               key={activeSchema.typeName}
               defs={lookupDefs}
               applied={appliedLookup}
-              onApply={setAppliedLookup}
+              onApply={applyLookup}
               messagePrefix="documents"
               idPrefix="documents-lookup"
               supportsSortWindow

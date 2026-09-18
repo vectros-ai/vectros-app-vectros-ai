@@ -7,7 +7,9 @@
 //   - ranking MODE: Hybrid (lexical + semantic) / Semantic / Keyword;
 //   - SCOPE filters: content source (all/documents/records), folder, schema type;
 //   - PAGINATION via offset ("Load more");
-//   - result META: total count, search time, and a degraded-results warning.
+//   - result META: total count, search time, and a degraded-results warning;
+//   - RE-RUN: submitting the same query again, or the refresh control on the
+//     results, empty, and error states, re-runs the search from its first page.
 // Each result card leads with the item's title (from `metadata`), a semantic
 // similarity indicator, source/folder chips, and a matched-text snippet, and
 // links into the matching record/document detail.
@@ -19,7 +21,7 @@
 // Renders inside RequireContext, so useActiveContextId() is safe here.
 // ---------------------------------------------------------------------------
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link as RouterLink } from 'react-router';
 import {
   Alert,
@@ -47,7 +49,7 @@ import type { SelectChangeEvent } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
 import { ApiErrorAlert, LoadingBlock, distinctTypes } from '@vectros-ai/react';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { hashKey, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
@@ -57,10 +59,13 @@ import { drainPages } from '../../lib/drainPages';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { folderMenuItems } from '../../components/folderMenuItems';
 import { OwnershipScopeFilter } from '../../components/OwnershipScopeFilter';
+import { RefreshButton } from '../../components/RefreshButton';
 import { ownershipScopeQueryArgs, scopeFiltersParam } from '../../lib/ownershipScopes';
 
 /** Result page size — the API caps at 100; 25 is a reasonable page. */
 const SEARCH_LIMIT = 25;
+/** How long the owner-scope box must sit unchanged before its value is applied. */
+const OWNER_SCOPE_DEBOUNCE_MS = 400;
 /** The API caps `offset` at 200, so paging stops once we'd cross it. */
 const MAX_OFFSET = 200;
 /** Page size for draining the folder list (the API's max). */
@@ -96,6 +101,7 @@ export function SearchPage(): React.JSX.Element {
   const tenant = useActiveTenantId();
   const context = useActiveContextId();
   const intl = useIntl();
+  const queryClient = useQueryClient();
 
   const [queryInput, setQueryInput] = useState('');
   const [submittedQuery, setSubmittedQuery] = useState('');
@@ -109,7 +115,16 @@ export function SearchPage(): React.JSX.Element {
   // this box takes a comma-separated list; `ownershipScopeQueryArgs` picks the
   // `scope`-vs-`scopeFilters` wire field, which the API treats as exclusive.
   const [ownerScope, setOwnerScope] = useState('');
-  const ownerScopeEntries = scopeFiltersParam(ownerScope);
+  // Every search is billed, and each keystroke that forms a valid entry
+  // (`org:a`, `org:ac`, ...) would otherwise be a new query key and a new
+  // search. So the box's value is applied only once it has sat unchanged for a
+  // moment; a submit applies it at once. The key carries the parsed entries, so
+  // a settled value equivalent to the one already applied changes nothing.
+  const [appliedOwnerScope, setAppliedOwnerScope] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setAppliedOwnerScope(ownerScope), OWNER_SCOPE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [ownerScope]);
 
   // Filter option sources (cached; shared with the records/documents pages).
   const foldersQuery = useQuery({
@@ -146,16 +161,20 @@ export function SearchPage(): React.JSX.Element {
   // both content types ("all") or just the one selected.
   const typeName = typeFilter !== ANY_TYPE ? typeFilter : undefined;
   // Stable serialization of everything that affects the result set.
-  const descriptor = JSON.stringify({
-    mode,
-    scope,
-    folder: folderId ?? null,
-    type: typeName ?? null,
-    owner: ownerScopeEntries ?? null,
-  });
+  const descriptorFor = (owner: string): string =>
+    JSON.stringify({
+      mode,
+      scope,
+      folder: folderId ?? null,
+      type: typeName ?? null,
+      owner: scopeFiltersParam(owner) ?? null,
+    });
 
+  const searchKeyFor = (term: string, owner: string = appliedOwnerScope) =>
+    dataQueryKeys.search(tenant, context, term, descriptorFor(owner));
+  const searchKey = searchKeyFor(submittedQuery);
   const searchQuery = useInfiniteQuery({
-    queryKey: dataQueryKeys.search(tenant, context, submittedQuery, descriptor),
+    queryKey: searchKey,
     queryFn: ({ pageParam }) => {
       const contentTypes = contentTypesFor(scope);
       return vectrosApiClient(tenant, context).search.content({
@@ -166,7 +185,7 @@ export function SearchPage(): React.JSX.Element {
         ...(contentTypes ? { contentTypes } : {}),
         ...(folderId ? { folderId } : {}),
         ...(typeName ? { typeName } : {}),
-        ...ownershipScopeQueryArgs(ownerScope),
+        ...ownershipScopeQueryArgs(appliedOwnerScope),
       });
     },
     initialPageParam: 0,
@@ -177,12 +196,55 @@ export function SearchPage(): React.JSX.Element {
       return loaded; // the next offset
     },
     enabled: submittedQuery !== '',
+    // Every search is billed, and react-query's AUTOMATIC refetches re-fetch
+    // every page an infinite query has loaded, exactly like `refetch()`. Two of
+    // them would re-walk a search the caller paged through without asking:
+    // returning to a stale cached term, and a network reconnect. So a search
+    // nobody is showing is dropped at once (returning to it runs page one, once),
+    // and nothing refetches on reconnect or focus. An explicit re-run goes
+    // through `rerunFromFirstPage` below.
+    gcTime: 0,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
   });
+
+  /**
+   * Re-run the current search from its FIRST page. Not `refetch()`: on an
+   * infinite query that re-fetches every page already loaded, so a caller who
+   * had pressed "Load more" several times would re-issue each of those billed
+   * searches. A fresh search starts at the first page anyway.
+   */
+  const rerunFromFirstPage = (): void => {
+    void queryClient.resetQueries({ queryKey: searchKey, exact: true });
+  };
 
   const handleSubmit = (event: React.FormEvent): void => {
     event.preventDefault();
-    setSubmittedQuery(queryInput.trim());
+    const next = queryInput.trim();
+    // Re-submitting the same query leaves the query key unchanged, so the cached
+    // pages would be served and no request issued. Indexing is asynchronous: a
+    // search run seconds before a new item is indexed would stay empty however
+    // often it was re-run. Re-run explicitly instead. A re-submit while any fetch
+    // is in flight ("Load more" included) is dropped: resetting would cancel a
+    // search request that was already sent.
+    // Compared with the owner scope as typed, which the submit applies at once.
+    if (next !== '' && hashKey(searchKeyFor(next, ownerScope)) === hashKey(searchKey)) {
+      if (!searchQuery.isFetching) rerunFromFirstPage();
+      return;
+    }
+    setAppliedOwnerScope(ownerScope);
+    setSubmittedQuery(next);
   };
+
+  // Offered wherever a submitted search is on screen, including the empty and
+  // error states: those are where a re-run is most needed.
+  const refreshButton = (
+    <RefreshButton
+      onClick={rerunFromFirstPage}
+      loading={searchQuery.isFetching}
+      label={intl.formatMessage({ id: 'search.refresh' })}
+    />
+  );
 
   const pages = searchQuery.data?.pages ?? [];
   const results: ReadonlyArray<SearchResultItem> = pages.flatMap((p) => p.results ?? []);
@@ -330,16 +392,16 @@ export function SearchPage(): React.JSX.Element {
       ) : searchQuery.isPending ? (
         <LoadingBlock label={intl.formatMessage({ id: 'search.loading' })} />
       ) : searchQuery.isError ? (
-        <Alert severity="error">
+        <Alert severity="error" action={refreshButton}>
           <FormattedMessage id="search.error" />
         </Alert>
       ) : results.length === 0 ? (
-        <Alert severity="info">
+        <Alert severity="info" action={refreshButton}>
           <FormattedMessage id="search.empty" values={{ query: submittedQuery }} />
         </Alert>
       ) : (
         <Stack spacing={2}>
-          <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5, flexWrap: 'wrap' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, flexWrap: 'wrap' }}>
             <Typography variant="body2" color="text.secondary">
               <FormattedMessage id="search.resultCount" values={{ count: totalResults }} />
             </Typography>
@@ -348,6 +410,7 @@ export function SearchPage(): React.JSX.Element {
                 <FormattedMessage id="search.timing" values={{ ms: searchTimeMs }} />
               </Typography>
             )}
+            {refreshButton}
           </Box>
 
           {degraded && (

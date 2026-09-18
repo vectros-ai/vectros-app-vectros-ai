@@ -46,6 +46,12 @@ interface TestProvidersProps {
   readonly authOverrides?: Partial<FullMockProvider>;
   /** Pre-built mock adapter, used as-is instead of building one from `authOverrides`. See module header. */
   readonly adapter?: FullMockProvider;
+  /**
+   * Query stale time. Defaults to `Infinity` so assertion timing is
+   * deterministic; pass `0` to exercise the automatic refetches production's
+   * finite stale time allows (returning to a cached key, a reconnect).
+   */
+  readonly staleTime?: number | undefined;
 }
 
 export function TestProviders({
@@ -53,13 +59,14 @@ export function TestProviders({
   initialEntries = ['/'],
   authOverrides,
   adapter,
+  staleTime = Infinity,
 }: TestProvidersProps): React.JSX.Element {
   // A test-strict client: no retries, no background refetch, infinite gc so
   // assertion timing is deterministic. Constructed per render (each test's
   // render mounts a fresh TestProviders).
   const queryClient = new QueryClient({
     defaultOptions: {
-      queries: { retry: false, gcTime: Infinity, staleTime: Infinity },
+      queries: { retry: false, gcTime: Infinity, staleTime },
       mutations: { retry: false },
     },
   });

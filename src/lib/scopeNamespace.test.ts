@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { SCOPE_RESERVED_NAMESPACES, validateScopeNamespace } from './scopeNamespace';
 
 describe('validateScopeNamespace', () => {
-  it('accepts built-ins + well-formed custom namespaces', () => {
+  it('accepts org/client (ordinary namespaces, not built-ins) + well-formed custom namespaces', () => {
     for (const ns of ['org', 'client', 'group', 'eng-team', 'a1']) {
       expect(validateScopeNamespace(ns)).toBeNull();
     }

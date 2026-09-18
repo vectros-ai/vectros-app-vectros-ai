@@ -4,7 +4,7 @@
 // The theme deliberately strips MUI's default elevation/shadow on Paper,
 // Card, Button, and AppBar. This is an aesthetic choice — flat, dense data
 // UI. Borders carry the visual structure instead of shadows. Kept in lockstep
-// with ui/admin-app so the reference apps share one visual language.
+// with the Vectros Admin App so the reference apps share one visual language.
 // ---------------------------------------------------------------------------
 
 import { createTheme } from '@mui/material';
