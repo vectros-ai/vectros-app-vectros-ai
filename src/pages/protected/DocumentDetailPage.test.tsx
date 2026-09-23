@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes, useLocation } from 'react-router';
 import { CurrentTenantProvider } from '@vectros-ai/react';
@@ -700,5 +700,214 @@ describe('DocumentDetailPage', () => {
     // The list route renders AND the URL carries the document's type.
     expect(await screen.findByText('documents list')).toBeInTheDocument();
     expect(screen.getByTestId('location')).toHaveTextContent('/documents?type=decision');
+  });
+});
+
+// The download link comes back from the API as a presigned storage URL. It is opened only
+// when it is https: a script scheme handed to window.open would run in this origin.
+describe('DocumentDetailPage download link', () => {
+  const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+  beforeEach(() => {
+    mockedClient.mockReset();
+    openSpy.mockClear();
+  });
+
+  async function clickDownload(downloadUrl: string): Promise<void> {
+    const getDocumentDownloadUrl = vi.fn().mockResolvedValue({ downloadUrl });
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Q1 Report',
+        status: 'ACTIVE',
+        indexStatus: 'INDEXED',
+        storeText: true,
+        fileType: 'application/pdf',
+        fileSize: 2048,
+        version: 1,
+      }),
+      getDocumentDownloadUrl,
+    });
+    renderDetail();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /download original/i }));
+    await waitFor(() => expect(getDocumentDownloadUrl).toHaveBeenCalledTimes(1));
+  }
+
+  it.each([
+    ['javascript:', 'javascript:alert(document.domain)'],
+    ['a mixed-case script scheme', 'JaVaScRiPt:alert(1)'],
+    ['data:', 'data:text/html,<script>alert(1)</script>'],
+    ['plain http', 'http://s3.example/get/doc_1'],
+    ['protocol-relative', '//evil.example/get'],
+    ['a relative path', '/get/doc_1'],
+  ])('does not open a download link that is %s, and says it was refused (no "try again")', async (_name, downloadUrl) => {
+    await clickDownload(downloadUrl);
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/not a secure \(https\) address/i);
+    expect(alert).not.toHaveTextContent(/please try again/i);
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('says the link could not be generated (a retry can help) when the API returns none', async () => {
+    await clickDownload('');
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/couldn't generate a download link/i);
+    expect(alert).toHaveTextContent(/please try again/i);
+    expect(openSpy).not.toHaveBeenCalled();
+  });
+
+  it('opens an https download link, with the checked (normalised) value (control)', async () => {
+    await clickDownload('  HTTPS://S3.Example/get/doc_1?X-Amz-Signature=abc  ');
+
+    await waitFor(() =>
+      expect(openSpy).toHaveBeenCalledWith(
+        'https://s3.example/get/doc_1?X-Amz-Signature=abc',
+        '_blank',
+        'noopener,noreferrer',
+      ),
+    );
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+// The other two places this page sends a request to an address the API supplied: the replacement
+// upload (a PUT of the user's file) and the in-page file view (a GET). Neither may go to anything
+// but https, and a refused address must send nothing.
+describe('DocumentDetailPage requests to API-supplied addresses', () => {
+  beforeEach(() => {
+    mockedClient.mockReset();
+  });
+
+  const NOT_HTTPS: ReadonlyArray<readonly [string, string]> = [
+    ['plain http', 'http://s3.example/put'],
+    ['javascript:', 'javascript:alert(1)'],
+    ['data:', 'data:text/plain,x'],
+    ['protocol-relative', '//evil.example/put'],
+    ['a relative path', '/put'],
+  ];
+
+  it.each(NOT_HTTPS)('does not PUT the replacement file to %s', async (_name, uploadUrl) => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      stub({
+        getDocument: vi.fn().mockResolvedValue({
+          id: 'doc_1',
+          title: 'Q1 Report',
+          status: 'ACTIVE',
+          externalId: 'q1-report',
+          fileType: 'application/pdf',
+          storeText: false,
+        }),
+        uploadDocument: vi.fn().mockResolvedValue({ id: 'doc_1', uploadUrl }),
+      });
+      renderDetail();
+
+      await screen.findByRole('button', { name: 'Replace file' });
+      await user.upload(
+        screen.getByLabelText('Replacement file'),
+        new File(['new bytes'], 'q1-v2.pdf', { type: 'application/pdf' }),
+      );
+
+      expect(await screen.findByText(/couldn't replace the file/i)).toBeInTheDocument();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('PUTs the replacement file to the checked (normalised) https address, not the raw value (control)', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      stub({
+        getDocument: vi.fn().mockResolvedValue({
+          id: 'doc_1',
+          title: 'Q1 Report',
+          status: 'ACTIVE',
+          externalId: 'q1-report',
+          fileType: 'application/pdf',
+          storeText: false,
+        }),
+        uploadDocument: vi
+          .fn()
+          .mockResolvedValue({ id: 'doc_1', uploadUrl: '  HTTPS://S3.Example/re-put?X-Amz-Signature=abc  ' }),
+      });
+      renderDetail();
+
+      await screen.findByRole('button', { name: 'Replace file' });
+      await user.upload(
+        screen.getByLabelText('Replacement file'),
+        new File(['new bytes'], 'q1-v2.pdf', { type: 'application/pdf' }),
+      );
+
+      await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith(
+          'https://s3.example/re-put?X-Amz-Signature=abc',
+          expect.objectContaining({ method: 'PUT' }),
+        ),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(NOT_HTTPS)('does not fetch the file view from %s', async (_name, downloadUrl) => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => '# hi' });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      stub({
+        getDocument: vi.fn().mockResolvedValue({
+          id: 'doc_1',
+          title: 'kb-note.md',
+          storeText: false,
+          fileType: 'text/markdown',
+          fileSize: 2048,
+        }),
+        getDocumentDownloadUrl: vi.fn().mockResolvedValue({ downloadUrl }),
+      });
+      renderDetail();
+
+      await user.click(await screen.findByRole('button', { name: 'View file contents' }));
+
+      expect(await screen.findByText(/couldn.t load the file/i)).toBeInTheDocument();
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('fetches the file view from the checked (normalised) https address (control)', async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => '# hi' });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      stub({
+        getDocument: vi.fn().mockResolvedValue({
+          id: 'doc_1',
+          title: 'kb-note.md',
+          storeText: false,
+          fileType: 'text/markdown',
+          fileSize: 2048,
+        }),
+        getDocumentDownloadUrl: vi
+          .fn()
+          .mockResolvedValue({ downloadUrl: '  HTTPS://S3.Example/get/doc_1?X-Amz-Signature=abc  ' }),
+      });
+      renderDetail();
+
+      await user.click(await screen.findByRole('button', { name: 'View file contents' }));
+
+      await waitFor(() =>
+        expect(fetchMock).toHaveBeenCalledWith('https://s3.example/get/doc_1?X-Amz-Signature=abc'),
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

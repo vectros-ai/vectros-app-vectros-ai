@@ -3,6 +3,26 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.19.2 — 2026-09-22
+
+### Security
+
+- **A document's "Download original" link is opened only when it is an https URL.** The app asks the API
+  for a short-lived download link and opens the result in a new tab. It now opens the link only when it
+  is an https URL. A link that is present but not https is refused with its own message ("not a secure
+  (https) address", with no "try again", because trying again cannot change it); no link at all still
+  shows "couldn't generate a download link".
+- **The addresses the app sends a file to, or reads one from, are used only when they are https URLs.**
+  Adding a document, replacing a document's file and the in-page file view each use an address the API
+  returns (a presigned storage URL). The upload or read now goes ahead only for an https address, and
+  the address used is the one that was checked; anything else stops the action and shows its usual error.
+
+### Changed
+
+- **Repinned to `@vectros-ai/sdk` 0.45.0.** No client-side behavior change from the pin bump alone: this app is a
+  data-plane explorer with no identity/control-plane call site, so it consumes nothing of 0.45.0's issuer-verification
+  surface.
+
 ## 0.19.1 — 2026-09-17
 
 ### Fixed

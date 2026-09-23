@@ -167,6 +167,48 @@ describe('AddDocumentDialog — upload mode', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['plain http', 'http://s3.example/put'],
+    ['javascript:', 'javascript:alert(1)'],
+    ['protocol-relative', '//evil.example/put'],
+    ['a relative path', '/put'],
+  ])('sends nothing and shows an error when the presigned URL is %s', async (_name, uploadUrl) => {
+    const user = userEvent.setup();
+    const uploadDocument = vi.fn().mockResolvedValue({ uploadUrl });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    stub({ uploadDocument });
+
+    const { onClose } = renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/couldn.t add this document/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('PUTs to the checked (normalised) https address, not the raw value (control)', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ uploadUrl: '  HTTPS://S3.Example/put?X-Amz-Signature=abc  ' });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    stub({ uploadDocument });
+
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await vi.waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://s3.example/put?X-Amz-Signature=abc',
+        expect.objectContaining({ method: 'PUT', body: FILE }),
+      ),
+    );
+  });
+
   it('shows an error when the S3 PUT fails', async () => {
     const user = userEvent.setup();
     const uploadDocument = vi.fn().mockResolvedValue({ uploadUrl: 'https://s3.example/put' });

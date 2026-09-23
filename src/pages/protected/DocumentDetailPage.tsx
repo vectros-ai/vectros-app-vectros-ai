@@ -65,6 +65,7 @@ import {
   documentStatusLabel,
 } from '../../lib/documentLabels';
 import { formatBytes } from '../../lib/formatBytes';
+import { httpsUrlOrNull } from '../../lib/httpsUrl';
 import { MAX_UPLOAD_BYTES } from '../../lib/uploadLimits';
 import { presignedUploadHeaders } from '../../lib/presignedUpload';
 import { drainPages } from '../../lib/drainPages';
@@ -90,7 +91,9 @@ export function DocumentDetailPage(): React.JSX.Element {
   const { documentId = '' } = useParams();
 
   const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState(false);
+  // Why the last download did not open: the link could not be fetched (worth retrying), or the API
+  // returned an address that is not https and was refused (retrying cannot change that).
+  const [downloadError, setDownloadError] = useState<'failed' | 'refused' | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
@@ -214,12 +217,15 @@ export function DocumentDetailPage(): React.JSX.Element {
         ...(doc.schemaId ? { schemaId: doc.schemaId } : {}),
       });
       try {
-        if (!issued.uploadUrl) throw new Error('upload did not return a presigned URL');
+        // The URL came from the API and the bytes go to whatever it names, so only an https address is
+        // used, and the value written to is the one that was checked.
+        const uploadUrl = httpsUrlOrNull(issued.uploadUrl);
+        if (!uploadUrl) throw new Error('upload did not return an https presigned URL');
         // PUT the raw bytes straight to S3 — the presigned URL is self-
         // authenticating, so NO Authorization header (one would break the
         // signature). Content-Type must match the fileType we declared, and
         // any header the response requires is part of the signature too.
-        const put = await fetch(issued.uploadUrl, {
+        const put = await fetch(uploadUrl, {
           method: 'PUT',
           headers: { 'Content-Type': fileType, ...presignedUploadHeaders(issued) },
           body: file,
@@ -278,8 +284,9 @@ export function DocumentDetailPage(): React.JSX.Element {
       const res = await vectrosApiClient(tenant, context).documents.getDocumentDownloadUrl({
         id: documentId,
       });
-      if (!res.downloadUrl) throw new Error('no download URL');
-      const resp = await fetch(res.downloadUrl);
+      const url = httpsUrlOrNull(res.downloadUrl);
+      if (!url) throw new Error('no https download URL');
+      const resp = await fetch(url);
       if (!resp.ok) throw new Error(`file fetch failed: ${resp.status}`);
       return resp.text();
     },
@@ -302,18 +309,22 @@ export function DocumentDetailPage(): React.JSX.Element {
 
   const handleDownload = async (): Promise<void> => {
     setDownloading(true);
-    setDownloadError(false);
+    setDownloadError(null);
     try {
       const res = await vectrosApiClient(tenant, context).documents.getDocumentDownloadUrl({
         id: documentId,
       });
-      if (res.downloadUrl) {
-        window.open(res.downloadUrl, '_blank', 'noopener,noreferrer');
+      // Opened only when it is an https URL; the value written is the one that was checked.
+      const url = httpsUrlOrNull(res.downloadUrl);
+      if (url) {
+        window.open(url, '_blank', 'noopener,noreferrer');
       } else {
-        setDownloadError(true);
+        // An address that is present but not https is refused for good; no address at all is a failure
+        // to get the link.
+        setDownloadError(res.downloadUrl ? 'refused' : 'failed');
       }
     } catch {
-      setDownloadError(true);
+      setDownloadError('failed');
     } finally {
       setDownloading(false);
     }
@@ -628,7 +639,9 @@ export function DocumentDetailPage(): React.JSX.Element {
               </Stack>
               {downloadError && (
                 <Alert severity="error" role="alert" sx={{ alignSelf: 'flex-start' }}>
-                  <FormattedMessage id="documentDetail.downloadError" />
+                  <FormattedMessage
+                    id={downloadError === 'refused' ? 'documentDetail.downloadRefused' : 'documentDetail.downloadError'}
+                  />
                 </Alert>
               )}
               {replaceMutation.isSuccess && (
