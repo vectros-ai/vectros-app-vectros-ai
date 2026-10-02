@@ -25,6 +25,28 @@ function LocationProbe(): React.JSX.Element {
   return <div data-testid="location">{`${loc.pathname}${loc.search}`}</div>;
 }
 
+/**
+ * A `listFolders` mock for fixtures with no real nesting: `rows` answers the
+ * page's own top-level "every folder in this context" call (no
+ * `parentFolderId`), while any parent-scoped call (the cascade-delete plan
+ * walking a folder's sub-folders) sees none — matching every fixture below,
+ * none of which models an actual parent/child folder relationship. A plain
+ * `mockResolvedValue` would answer BOTH calls with the same rows, so cascade
+ * planning would see a folder as its own child and recurse forever.
+ */
+function flatFolderList(
+  rows: ReadonlyArray<{
+    id: string;
+    name?: string;
+    isProtected?: boolean;
+    parentFolderId?: string;
+  }>,
+) {
+  return vi.fn((req?: { parentFolderId?: string }) =>
+    Promise.resolve(pageOf(req?.parentFolderId ? [] : rows)),
+  );
+}
+
 vi.mock('../../api/vectrosApi', () => ({ vectrosApiClient: vi.fn() }));
 import { vectrosApiClient } from '../../api/vectrosApi';
 
@@ -46,6 +68,9 @@ function stub(opts: {
   schemas?: () => Promise<unknown>;
   createFolder?: (req: unknown) => Promise<unknown>;
   deleteFolder?: (req: { id: string }) => Promise<void>;
+  deleteDocument?: (req: { id: string }) => Promise<void>;
+  records?: () => Promise<unknown>;
+  deleteRecord?: (req: { id: string }) => Promise<void>;
   ingestDocument?: (req: unknown) => Promise<unknown>;
   uploadDocument?: (req: unknown) => Promise<unknown>;
   lookupDocumentsByBody?: (req: unknown) => Promise<unknown>;
@@ -63,11 +88,19 @@ function stub(opts: {
     },
     documents: {
       listDocuments: opts.documents ?? vi.fn().mockResolvedValue(pageOf([])),
+      deleteDocument: opts.deleteDocument ?? vi.fn().mockResolvedValue(undefined),
       ingestDocument: opts.ingestDocument ?? vi.fn().mockResolvedValue({ id: 'doc_new' }),
       uploadDocument:
         opts.uploadDocument ??
         vi.fn().mockResolvedValue({ id: 'doc_up', uploadUrl: 'https://s3.example/put' }),
       lookupDocumentsByBody: opts.lookupDocumentsByBody ?? vi.fn().mockResolvedValue(pageOf([])),
+    },
+    // Folder cascade-delete plans records too, even though this page never
+    // lists them — defaults to "none in any folder" so a delete-dialog open
+    // doesn't need every test to know about this SDK sub-client.
+    records: {
+      listRecords: opts.records ?? vi.fn().mockResolvedValue(pageOf([])),
+      deleteRecord: opts.deleteRecord ?? vi.fn().mockResolvedValue(undefined),
     },
     // The per-row "Ask" drawer mounts the model picker (useInferenceModels)
     // and, on submit, streams documentAsk. An empty catalogue renders the
@@ -84,7 +117,9 @@ function renderPage(initialEntries?: string[]): void {
     <TestProviders {...(initialEntries ? { initialEntries } : {})}>
       <CurrentTenantProvider initialMemberships={[OWNER]} initialTenant={TENANT}>
         <CurrentContextProvider
-          initialContexts={[{ contextId: 'default', name: 'Default', tenantId: TENANT, tenantKind: 'test' }]}
+          initialContexts={[
+            { contextId: 'default', name: 'Default', tenantId: TENANT, tenantKind: 'test' },
+          ]}
           initialContext="default"
         >
           <DocumentsPage />
@@ -101,17 +136,19 @@ describe('DocumentsPage', () => {
   it('lists documents with a link to detail, status, index chip, and folder name', async () => {
     stub({
       folders: vi.fn().mockResolvedValue(pageOf([{ id: 'f1', name: 'Reports' }])),
-      documents: vi.fn().mockResolvedValue(pageOf([
-        {
-          id: 'doc_1',
-          title: 'Q1 Report',
-          status: 'ACTIVE',
-          indexStatus: 'INDEXED',
-          folderId: 'f1',
-          fileType: 'application/pdf',
-          fileSize: 2048,
-        },
-      ])),
+      documents: vi.fn().mockResolvedValue(
+        pageOf([
+          {
+            id: 'doc_1',
+            title: 'Q1 Report',
+            status: 'ACTIVE',
+            indexStatus: 'INDEXED',
+            folderId: 'f1',
+            fileType: 'application/pdf',
+            fileSize: 2048,
+          },
+        ]),
+      ),
     });
 
     renderPage();
@@ -132,7 +169,9 @@ describe('DocumentsPage', () => {
     const listDocuments = vi
       .fn()
       .mockResolvedValue(
-        pageOf([{ id: 'doc_1', title: 'Q1 Report', status: 'ACTIVE', indexStatus: 'PENDING_INDEX' }]),
+        pageOf([
+          { id: 'doc_1', title: 'Q1 Report', status: 'ACTIVE', indexStatus: 'PENDING_INDEX' },
+        ]),
       );
     stub({ documents: listDocuments });
 
@@ -201,10 +240,12 @@ describe('DocumentsPage', () => {
       Promise.resolve(pageOf(req?.folderId ? ALL.filter((d) => d.folderId === req.folderId) : ALL)),
     );
     stub({
-      folders: vi.fn().mockResolvedValue(pageOf([
-        { id: 'f1', name: 'Reports' },
-        { id: 'f2', name: 'Invoices' },
-      ])),
+      folders: vi.fn().mockResolvedValue(
+        pageOf([
+          { id: 'f1', name: 'Reports' },
+          { id: 'f2', name: 'Invoices' },
+        ]),
+      ),
       documents: listDocuments,
     });
 
@@ -520,7 +561,12 @@ describe('DocumentsPage', () => {
     const lookupDocumentsByBody = vi
       .fn()
       .mockResolvedValueOnce(pageOf([]))
-      .mockImplementationOnce(() => new Promise((resolve) => { resolveRerun = resolve; }))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRerun = resolve;
+          }),
+      )
       .mockResolvedValue(pageOf([]));
     stub({
       folders: vi.fn().mockResolvedValue(pageOf([])),
@@ -711,9 +757,11 @@ describe('DocumentsPage', () => {
     // documents picker correct even if that invariant were ever violated.
     const user = userEvent.setup();
     stub({
-      schemas: vi.fn().mockResolvedValue(
-        pageOf([{ ...DECISION_SCHEMA, lookupFields: [{ fieldNames: ['status', 'summary'] }] }]),
-      ),
+      schemas: vi
+        .fn()
+        .mockResolvedValue(
+          pageOf([{ ...DECISION_SCHEMA, lookupFields: [{ fieldNames: ['status', 'summary'] }] }]),
+        ),
       documents: vi.fn().mockResolvedValue(pageOf(TYPED_DOCS)),
     });
     renderPage(['/?type=decision']);
@@ -750,9 +798,7 @@ describe('DocumentsPage', () => {
     // Both documents render (no type filter applied) and the Select shows All.
     expect(await screen.findByRole('link', { name: 'decision-note-1.md' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'scratch.txt' })).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: /document type/i })).toHaveTextContent(
-      'All types',
-    );
+    expect(screen.getByRole('combobox', { name: /document type/i })).toHaveTextContent('All types');
   });
 
   it('shows the type-scoped empty state when the type has no documents', async () => {
@@ -794,61 +840,85 @@ describe('DocumentsPage', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Create folder' }));
 
     // The request body nests under `body` (SDK 0.31 un-inlined it when `?upsert` was added).
-    await vi.waitFor(() => expect(createFolder).toHaveBeenCalledWith({ body: { name: 'Reports' } }));
+    await vi.waitFor(() =>
+      expect(createFolder).toHaveBeenCalledWith({ body: { name: 'Reports' } }),
+    );
   });
 
-  it('deletes a folder after confirmation', async () => {
+  it('deletes an empty folder after confirmation, with no cascade items', async () => {
     const user = userEvent.setup();
     const deleteFolder = vi.fn().mockResolvedValue(undefined);
-    stub({ folders: vi.fn().mockResolvedValue(pageOf([{ id: 'f1', name: 'Reports' }])), deleteFolder });
+    stub({ folders: flatFolderList([{ id: 'f1', name: 'Reports' }]), deleteFolder });
     renderPage();
 
     // The folder-management card renders a delete action for the (unprotected) folder.
     await user.click(await screen.findByRole('button', { name: /delete the reports folder/i }));
     const dialog = await screen.findByRole('dialog');
+    // The cascade plan resolves (this folder has nothing in it) before the
+    // confirm button is enabled.
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Delete folder' })).toBeEnabled(),
+    );
     await user.click(within(dialog).getByRole('button', { name: 'Delete folder' }));
 
     await vi.waitFor(() => expect(deleteFolder).toHaveBeenCalledWith({ id: 'f1' }));
   });
 
-  it('warns in the confirm body when the folder is not empty', async () => {
+  it('warns in the confirm body with the real cascade scope when the folder is not empty', async () => {
     const user = userEvent.setup();
     stub({
-      folders: vi.fn().mockResolvedValue(pageOf([{ id: 'f1', name: 'Reports' }])),
-      documents: vi
-        .fn()
-        .mockResolvedValue(pageOf([
-          { id: 'd1', title: 'In Reports', folderId: 'f1', status: 'ACTIVE', indexStatus: 'INDEXED' },
-        ])),
+      folders: flatFolderList([{ id: 'f1', name: 'Reports' }]),
+      documents: vi.fn().mockResolvedValue(
+        pageOf([
+          {
+            id: 'd1',
+            title: 'In Reports',
+            folderId: 'f1',
+            status: 'ACTIVE',
+            indexStatus: 'INDEXED',
+          },
+        ]),
+      ),
     });
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: /delete the reports folder/i }));
     const dialog = await screen.findByRole('dialog');
-    // The folder visibly contains a document → pre-emptive non-empty warning.
-    expect(within(dialog).getByText(/isn't empty/i)).toBeInTheDocument();
+    // The plan walks this folder directly (documents.listDocuments({folderId:
+    // 'f1'})) rather than reading whatever the page happens to have loaded —
+    // so it sees the one document and names it in the warning.
+    expect(await within(dialog).findByText(/1 document/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/permanently delete/i)).toBeInTheDocument();
   });
 
-  it('hides the non-empty warning for a folder outside the current scope (best-effort)', async () => {
+  it('shows the non-empty warning for a folder outside the current filter scope', async () => {
     const user = userEvent.setup();
-    // f1 (Reports) holds a doc; the f1-scoped list can't see f2 (Invoices)'s
-    // contents, so the doc-visibility gate must suppress the (uncertain) warning.
+    // f1 (Reports) holds a doc; f2 (Invoices) holds none. Filtering the page
+    // to f1 must not affect what the delete dialog finds when targeting f2 —
+    // the cascade plan queries f2 directly, not through the page's own
+    // (differently-scoped) documents list.
     const listDocuments = vi.fn((req?: { folderId?: string }) =>
       Promise.resolve(
         pageOf(
           req?.folderId === 'f1'
-            ? [{ id: 'd1', title: 'In Reports', folderId: 'f1', status: 'ACTIVE', indexStatus: 'INDEXED' }]
+            ? [
+                {
+                  id: 'd1',
+                  title: 'In Reports',
+                  folderId: 'f1',
+                  status: 'ACTIVE',
+                  indexStatus: 'INDEXED',
+                },
+              ]
             : [],
         ),
       ),
     );
     stub({
-      // Reports (f1) is protected → no delete button, so the only deletable
-      // folder is Invoices (f2); keeps the delete-button query unambiguous.
-      folders: vi.fn().mockResolvedValue(pageOf([
-        { id: 'f1', name: 'Reports', isProtected: true },
+      folders: flatFolderList([
+        { id: 'f1', name: 'Reports' },
         { id: 'f2', name: 'Invoices' },
-      ])),
+      ]),
       documents: listDocuments,
     });
     renderPage();
@@ -860,32 +930,72 @@ describe('DocumentsPage', () => {
       expect(listDocuments).toHaveBeenCalledWith(expect.objectContaining({ folderId: 'f1' })),
     );
 
-    // Open delete on Invoices (f2) — outside the current scope.
-    await user.click(screen.getByRole('button', { name: /delete the invoices folder/i }));
+    // Open delete on Reports (f1) itself — still scoped to f1 either way, but
+    // now via the plan's own dedicated query rather than the page's.
+    await user.click(screen.getByRole('button', { name: /delete the reports folder/i }));
     const dialog = await screen.findByRole('dialog');
-    expect(dialog).toHaveTextContent('Invoices'); // confirm we targeted f2
-    // Doc-visibility gate suppresses the uncertain warning; backend 400 still guards.
-    expect(within(dialog).queryByText(/isn't empty/i)).not.toBeInTheDocument();
+    expect(await within(dialog).findByText(/1 document/i)).toBeInTheDocument();
   });
 
-  it('shows a specific not-empty message when folder-delete fails with 400', async () => {
+  it('shows a specific message when the cascade finishes but the folder itself still refuses to delete', async () => {
     const user = userEvent.setup();
+    // The plan sees no documents/records/sub-folders (so no cascade items are
+    // staged), but the server's own delete still 400s — something outside
+    // this credential's read visibility is filed there.
     const deleteFolder = vi.fn().mockRejectedValue({ statusCode: 400 });
-    stub({ folders: vi.fn().mockResolvedValue(pageOf([{ id: 'f1', name: 'Reports' }])), deleteFolder });
+    stub({ folders: flatFolderList([{ id: 'f1', name: 'Reports' }]), deleteFolder });
     renderPage();
 
     await user.click(await screen.findByRole('button', { name: /delete the reports folder/i }));
     const dialog = await screen.findByRole('dialog');
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Delete folder' })).toBeEnabled(),
+    );
     await user.click(within(dialog).getByRole('button', { name: 'Delete folder' }));
 
-    // A 400 is the non-empty case — show the actionable copy, not generic retry.
-    expect(await within(dialog).findByText(/still contains items/i)).toBeInTheDocument();
+    expect(await within(dialog).findByText(/can't see/i)).toBeInTheDocument();
+    // The button relabels to Retry rather than repeating "Delete folder".
+    expect(within(dialog).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('shows the same specific message when a SUB-folder deep in the cascade refuses to delete, not just the target itself', async () => {
+    const user = userEvent.setup();
+    // f1 (the target) has one sub-folder, f2; both are otherwise empty. f2's
+    // own delete step 400s (something invisible to this credential is filed
+    // there) — the cascade never even reaches f1's own delete step.
+    const listFolders = vi.fn((req?: { parentFolderId?: string }) =>
+      Promise.resolve(
+        pageOf(
+          req?.parentFolderId === undefined
+            ? [{ id: 'f1', name: 'Reports' }]
+            : req.parentFolderId === 'f1'
+              ? [{ id: 'f2', name: 'Sub' }]
+              : [],
+        ),
+      ),
+    );
+    const deleteFolder = vi.fn((req: { id: string }) =>
+      req.id === 'f2' ? Promise.reject({ statusCode: 400 }) : Promise.resolve(undefined),
+    );
+    stub({ folders: listFolders, deleteFolder });
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: /delete the reports folder/i }));
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Delete folder' })).toBeEnabled(),
+    );
+    await user.click(within(dialog).getByRole('button', { name: 'Delete folder' }));
+
+    expect(await within(dialog).findByText(/can't see/i)).toBeInTheDocument();
+    expect(deleteFolder).toHaveBeenCalledWith({ id: 'f2' });
+    expect(deleteFolder).not.toHaveBeenCalledWith({ id: 'f1' }); // never reached
   });
 
   it('resets the folder filter to All when the filtered folder is deleted', async () => {
     const user = userEvent.setup();
     const deleteFolder = vi.fn().mockResolvedValue(undefined);
-    stub({ folders: vi.fn().mockResolvedValue(pageOf([{ id: 'f1', name: 'Reports' }])), deleteFolder });
+    stub({ folders: flatFolderList([{ id: 'f1', name: 'Reports' }]), deleteFolder });
     renderPage();
 
     // Filter to the Reports folder...
@@ -896,6 +1006,9 @@ describe('DocumentsPage', () => {
     // ...then delete it; the filter falls back to All (no stranded empty view).
     await user.click(screen.getByRole('button', { name: /delete the reports folder/i }));
     const dialog = await screen.findByRole('dialog');
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: 'Delete folder' })).toBeEnabled(),
+    );
     await user.click(within(dialog).getByRole('button', { name: 'Delete folder' }));
 
     await vi.waitFor(() =>
@@ -904,7 +1017,9 @@ describe('DocumentsPage', () => {
   });
 
   it('hides edit/delete for a protected folder', async () => {
-    stub({ folders: vi.fn().mockResolvedValue(pageOf([{ id: 'root', name: 'Root', isProtected: true }])) });
+    stub({
+      folders: vi.fn().mockResolvedValue(pageOf([{ id: 'root', name: 'Root', isProtected: true }])),
+    });
     renderPage();
     expect(await screen.findByText('Protected')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Delete folder' })).not.toBeInTheDocument();
@@ -927,7 +1042,11 @@ describe('DocumentsPage', () => {
       expect(ingestDocument).toHaveBeenCalledWith(
         // The request body nests under `body` (SDK 0.31 un-inlined it when `?upsert` was added).
         expect.objectContaining({
-          body: expect.objectContaining({ title: 'Notes', text: 'hello world', indexMode: 'HYBRID' }),
+          body: expect.objectContaining({
+            title: 'Notes',
+            text: 'hello world',
+            indexMode: 'HYBRID',
+          }),
         }),
       ),
     );
@@ -947,7 +1066,9 @@ describe('DocumentsPage', () => {
     renderPage();
 
     // The row exposes an "Ask this document" action scoped to that document.
-    await user.click(await screen.findByRole('button', { name: /ask a question about q1 report/i }));
+    await user.click(
+      await screen.findByRole('button', { name: /ask a question about q1 report/i }),
+    );
 
     // The drawer opens (its heading + document-scoped ask affordance show).
     expect(await screen.findByRole('heading', { name: 'Ask this document' })).toBeInTheDocument();
@@ -970,7 +1091,9 @@ describe('DocumentsPage', () => {
     stub({ folders: vi.fn().mockResolvedValue(pageOf([{ id: 'f1', name: 'Reports' }])) });
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: /ask a question scoped to the reports folder/i }));
+    await user.click(
+      await screen.findByRole('button', { name: /ask a question scoped to the reports folder/i }),
+    );
 
     expect(screen.getByTestId('location')).toHaveTextContent('/ai/ask?folderId=f1');
   });

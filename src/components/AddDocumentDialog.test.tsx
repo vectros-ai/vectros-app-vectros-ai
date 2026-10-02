@@ -612,6 +612,304 @@ describe('AddDocumentDialog — externalId on upload', () => {
   });
 });
 
+// The API refuses an externalId that arrives without a schemaId unless the request also carries
+// `confirmUntyped` (a 400 otherwise). The dialog sends it only on a deliberate untyped choice: the user
+// picked "Untyped (no schema)", or there is no Type list to choose from (the tenant has no document types,
+// which is the case for the first two cells below). A typed create names its schema and must not send it,
+// and a create with no externalId has nothing to confirm.
+describe('AddDocumentDialog — confirming an untyped externalId create', () => {
+  beforeEach(() => mockedClient.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const CONTRACT_TYPE = {
+    id: 'sch_contract',
+    typeName: 'contract',
+    allowedSurfaces: ['document'],
+    fields: [{ fieldId: 'category', fieldType: 'string' }],
+  };
+
+  it('upload: "No type" + an externalId sends confirmUntyped', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_1', uploadUrl: 'https://s3.example/put', created: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    stub({ uploadDocument });
+
+    const { onClose } = renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), 'report-2026-q1');
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await vi.waitFor(() =>
+      expect(uploadDocument).toHaveBeenCalledWith({
+        fileName: 'report.pdf',
+        fileType: 'application/pdf',
+        indexMode: 'HYBRID',
+        storeText: true,
+        externalId: 'report-2026-q1',
+        confirmUntyped: true,
+      }),
+    );
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('text ingest: "No type" + an externalId sends confirmUntyped on the request, not in the body', async () => {
+    const user = userEvent.setup();
+    const ingestDocument = vi.fn().mockResolvedValue({ id: 'doc_2', created: true });
+    stub({ ingestDocument });
+
+    const { onClose } = renderDialog();
+    await user.click(screen.getByRole('button', { name: 'Ingest text' }));
+    await user.type(screen.getByRole('textbox', { name: /title/i }), 'Notes');
+    await user.type(screen.getByRole('textbox', { name: /text content/i }), 'some text');
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), 'notes-1');
+    await user.click(screen.getByRole('button', { name: 'Ingest' }));
+
+    await vi.waitFor(() => expect(ingestDocument).toHaveBeenCalled());
+    const request = ingestDocument.mock.calls[0]?.[0] as {
+      confirmUntyped?: boolean;
+      body: Record<string, unknown>;
+    };
+    // A query parameter on the wire, so it belongs beside `upsert`, never inside the JSON body.
+    expect(request.confirmUntyped).toBe(true);
+    expect(request.body).not.toHaveProperty('confirmUntyped');
+    expect(request.body).toMatchObject({ externalId: 'notes-1' });
+    expect(request.body).not.toHaveProperty('schemaId');
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('upload: a TYPED create with an externalId names its schema and does not send confirmUntyped', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_1', uploadUrl: 'https://s3.example/put', created: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    stub({ uploadDocument }, [CONTRACT_TYPE]);
+
+    const { onClose } = renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.click(await screen.findByLabelText('Type (optional)'));
+    await user.click(await screen.findByRole('option', { name: 'contract' }));
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), 'contract-7');
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await vi.waitFor(() => expect(uploadDocument).toHaveBeenCalled());
+    const request = uploadDocument.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(request).toMatchObject({ schemaId: 'sch_contract', externalId: 'contract-7' });
+    expect(request).not.toHaveProperty('confirmUntyped');
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('text ingest: a TYPED create with an externalId does not send confirmUntyped', async () => {
+    const user = userEvent.setup();
+    const ingestDocument = vi.fn().mockResolvedValue({ id: 'doc_2', created: true });
+    stub({ ingestDocument }, [CONTRACT_TYPE]);
+
+    const { onClose } = renderDialog();
+    await user.click(screen.getByRole('button', { name: 'Ingest text' }));
+    await user.type(screen.getByRole('textbox', { name: /title/i }), 'MSA');
+    await user.type(screen.getByRole('textbox', { name: /text content/i }), 'terms…');
+    await user.click(await screen.findByLabelText('Type (optional)'));
+    await user.click(await screen.findByRole('option', { name: 'contract' }));
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), 'msa-1');
+    await user.click(screen.getByRole('button', { name: 'Ingest' }));
+
+    await vi.waitFor(() => expect(ingestDocument).toHaveBeenCalled());
+    const request = ingestDocument.mock.calls[0]?.[0] as {
+      body: Record<string, unknown>;
+    };
+    expect(request.body).toMatchObject({ schemaId: 'sch_contract', externalId: 'msa-1' });
+    expect(request).not.toHaveProperty('confirmUntyped');
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  // The Type selector DEFAULTS to "Untyped (no schema)", and is on screen only when the tenant has at least one
+  // document type. A value the user never looked at is a default, not a choice, so an External ID on it must not
+  // be confirmed on their behalf: it would defeat the very guard the flag exists to satisfy.
+  it('a tenant WITH document types: an External ID on the untouched default is held back, with a hint', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi.fn();
+    stub({ uploadDocument }, [CONTRACT_TYPE]);
+
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await screen.findByLabelText('Type (optional)');
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), 'po-7');
+
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeDisabled();
+    expect(screen.getByText(/needs a deliberate choice of type/i)).toBeInTheDocument();
+    expect(uploadDocument).not.toHaveBeenCalled();
+  });
+
+  it('while the document types are still loading, an External ID is held back too: a tenant with types is not confirmed untyped by a slow answer', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi.fn();
+    // The schema list never resolves, so the Type list is not on screen yet.
+    mockedClient.mockReturnValue({
+      documents: { uploadDocument },
+      schemas: { listSchemas: vi.fn(() => new Promise(() => {})) },
+    } as never);
+
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), 'po-7');
+
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeDisabled();
+    expect(screen.getByText(/Loading your document types/i)).toBeInTheDocument();
+    expect(uploadDocument).not.toHaveBeenCalled();
+  });
+
+  it('if the document types cannot be loaded, an External ID is held back with a visible reason, and Retry releases it', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_1', uploadUrl: 'https://s3.example/put', created: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    // The first load fails (the picker would silently stay hidden); the retry returns a tenant with no types.
+    const listSchemas = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValue({ data: [] });
+    mockedClient.mockReturnValue({ documents: { uploadDocument }, schemas: { listSchemas } } as never);
+
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), 'po-7');
+
+    expect(await screen.findByText(/could not be loaded/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeDisabled();
+    expect(uploadDocument).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Upload' })).toBeEnabled());
+    expect(listSchemas).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/could not be loaded/i)).not.toBeInTheDocument();
+  });
+
+  it('...and choosing "Untyped (no schema)" on purpose confirms it', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_1', uploadUrl: 'https://s3.example/put', created: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    stub({ uploadDocument }, [CONTRACT_TYPE]);
+
+    const { onClose } = renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), 'po-7');
+    await user.click(await screen.findByLabelText('Type (optional)'));
+    await user.click(await screen.findByRole('option', { name: 'Untyped (no schema)' }));
+
+    expect(screen.queryByText(/needs a deliberate choice of type/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await vi.waitFor(() => expect(uploadDocument).toHaveBeenCalled());
+    const request = uploadDocument.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(request).toMatchObject({ externalId: 'po-7', confirmUntyped: true });
+    expect(request).not.toHaveProperty('schemaId');
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('...and picking a type instead sends that type and no confirmation', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_1', uploadUrl: 'https://s3.example/put', created: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    stub({ uploadDocument }, [CONTRACT_TYPE]);
+
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), 'po-7');
+    await user.click(await screen.findByLabelText('Type (optional)'));
+    await user.click(await screen.findByRole('option', { name: 'contract' }));
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await vi.waitFor(() => expect(uploadDocument).toHaveBeenCalled());
+    const request = uploadDocument.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(request).toMatchObject({ externalId: 'po-7', schemaId: 'sch_contract' });
+    expect(request).not.toHaveProperty('confirmUntyped');
+  });
+
+  it('opening the Type list counts as looking at it, so closing it unchanged releases the hold', async () => {
+    const user = userEvent.setup();
+    stub({ uploadDocument: vi.fn() }, [CONTRACT_TYPE]);
+
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), 'po-7');
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeDisabled();
+
+    await user.click(await screen.findByLabelText('Type (optional)'));
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeEnabled();
+  });
+
+  it('a whitespace-only External ID is no External ID: no hold, no flag, no externalId sent', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi
+      .fn()
+      .mockResolvedValue({ id: 'doc_1', uploadUrl: 'https://s3.example/put', created: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    stub({ uploadDocument }, [CONTRACT_TYPE]);
+
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), FILE);
+    await screen.findByLabelText('Type (optional)');
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), '   ');
+
+    expect(screen.queryByText(/needs a deliberate choice of type/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+    await vi.waitFor(() => expect(uploadDocument).toHaveBeenCalled());
+    const request = uploadDocument.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(request).not.toHaveProperty('confirmUntyped');
+    expect(request).not.toHaveProperty('externalId');
+  });
+
+  it('text ingest: "update if it already exists" and the confirmation go out together, neither replacing the other', async () => {
+    const user = userEvent.setup();
+    const ingestDocument = vi.fn().mockResolvedValue({ id: 'doc_1', created: false });
+    stub({ ingestDocument });
+
+    renderDialog();
+    await user.click(screen.getByRole('button', { name: /ingest text/i }));
+    await user.type(screen.getByRole('textbox', { name: /title/i }), 'Notes v2');
+    await user.type(screen.getByRole('textbox', { name: /text content/i }), 'Changed body');
+    await user.type(screen.getByRole('textbox', { name: /external id/i }), 'notes-1');
+    await user.click(screen.getByRole('switch', { name: /update it if it already exists/i }));
+    await user.click(screen.getByRole('button', { name: 'Ingest' }));
+
+    await vi.waitFor(() => expect(ingestDocument).toHaveBeenCalled());
+    const request = ingestDocument.mock.calls[0]?.[0] as {
+      upsert?: boolean;
+      confirmUntyped?: boolean;
+      body: Record<string, unknown>;
+    };
+    expect(request.upsert).toBe(true);
+    expect(request.confirmUntyped).toBe(true);
+    expect(request.body).not.toHaveProperty('confirmUntyped');
+    expect(request.body).not.toHaveProperty('schemaId');
+  });
+
+  it('text ingest: "No type" with NO externalId has nothing to confirm and sends no flag', async () => {
+    const user = userEvent.setup();
+    const ingestDocument = vi.fn().mockResolvedValue({ id: 'doc_3', created: true });
+    stub({ ingestDocument });
+
+    const { onClose } = renderDialog();
+    await user.click(screen.getByRole('button', { name: 'Ingest text' }));
+    await user.type(screen.getByRole('textbox', { name: /title/i }), 'Scratch');
+    await user.type(screen.getByRole('textbox', { name: /text content/i }), 'scratch');
+    await user.click(screen.getByRole('button', { name: 'Ingest' }));
+
+    await vi.waitFor(() => expect(ingestDocument).toHaveBeenCalled());
+    expect(ingestDocument.mock.calls[0]?.[0]).not.toHaveProperty('confirmUntyped');
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+});
+
 describe('AddDocumentDialog — typed create (document-surface schemas)', () => {
   beforeEach(() => mockedClient.mockReset());
   afterEach(() => vi.unstubAllGlobals());

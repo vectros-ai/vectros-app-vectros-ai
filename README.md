@@ -29,7 +29,7 @@ Fork it. Re-brand it in one file. Point it at your own Cognito pool. Ship.
 | Hybrid search | One ranked result set across records and documents: ranking mode (hybrid/semantic/keyword), content-source, folder, type, and owner-scope filters (narrow by several ownership dimensions at once, e.g. `org:acme, client:pilot`), offset paging. |
 | AI workspace | Multi-turn chat over the context's data, single-shot ask with citations, and per-document Q&A — all streaming, with a model picker. |
 | Version history | The audit trail (who changed what, when) on every record and document detail. |
-| Cognito authentication | Amplify v6 against the shared DeveloperUserPool, via `@vectros-ai/react`'s `CognitoAuthProvider`. Sign-in + MFA challenge only — account setup lives in the admin app. |
+| Cognito authentication | Amplify v6 against the Vectros developer user pool, via `@vectros-ai/react`'s `CognitoAuthProvider`. Sign-in + MFA challenge only — account setup lives in the admin app. |
 | Protected routing + app shell | `RequireAuth` guard and `AppLayout` (skip-link, responsive drawer, user menu) from `@vectros-ai/react`. |
 | Per-(tenant, context) token cache | The `st_*` bearer cache from `@vectros-ai/react`, keyed by `(tenant, context)` — the foundation for the context switcher. |
 | Theming + branding | Single-file re-skin via [`src/brand.ts`](src/brand.ts). |
@@ -54,7 +54,7 @@ exactly so the reference apps share one set of conventions:
 
 ## Quick start (local development)
 
-Prerequisites: Node 22+ (see [`.nvmrc`](.nvmrc)), npm 10+.
+Prerequisites: Node 22.22+ (see [`.nvmrc`](.nvmrc)), npm 10+.
 
 ```bash
 npm install
@@ -137,7 +137,7 @@ app-vectros-ai/
 │   ├── auth/            # Thin re-export of @vectros-ai/react + the context provider
 │   ├── components/      # Dialogs (add/edit document, folders), LookupPanel,
 │   │                    # Markdown viewer, version history, model picker, …
-│   ├── hooks/           # Inference streaming + model registry
+│   ├── hooks/           # Model registry (inference streaming is `useInferenceStream` in `@vectros-ai/react`)
 │   ├── i18n/            # IntlProvider wrapper + the English catalog
 │   ├── lib/             # queryClient, drainPages, schema/record/document helpers
 │   ├── pages/

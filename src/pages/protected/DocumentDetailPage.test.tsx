@@ -166,7 +166,7 @@ describe('DocumentDetailPage', () => {
 
     // Merge-patch: only `status` — no title carry-forward.
     await vi.waitFor(() =>
-      expect(patchDocument).toHaveBeenCalledWith({ id: 'doc_1', body: { status: 'ARCHIVED' } }),
+      expect(patchDocument).toHaveBeenCalledWith({ id: 'doc_1', status: 'ARCHIVED' }),
     );
   });
 
@@ -188,11 +188,11 @@ describe('DocumentDetailPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Restore' }));
     await vi.waitFor(() =>
-      expect(patchDocument).toHaveBeenCalledWith({ id: 'doc_1', body: { status: 'ACTIVE' } }),
+      expect(patchDocument).toHaveBeenCalledWith({ id: 'doc_1', status: 'ACTIVE' }),
     );
   });
 
-  it('replaces the file via a re-upload keyed on the document externalId', async () => {
+  it('replaces an UNTYPED document via a re-upload keyed on its externalId, confirming it is untyped', async () => {
     const user = userEvent.setup();
     const uploadDocument = vi
       .fn()
@@ -218,12 +218,16 @@ describe('DocumentDetailPage', () => {
     await user.upload(screen.getByLabelText('Replacement file'), file);
 
     // Re-initiating the upload with the SAME externalId targets the existing
-    // document; the new bytes then re-extract + re-index it.
+    // document; the new bytes then re-extract + re-index it. This document has no
+    // schemaId, and the API refuses an externalId with none (a 400, even when the
+    // call would only match an existing row) unless `confirmUntyped` is sent — so
+    // without it this replace cannot succeed. The typed case below sends no such flag.
     await vi.waitFor(() =>
       expect(uploadDocument).toHaveBeenCalledWith({
         fileName: 'q1-v2.pdf',
         fileType: 'application/pdf',
         externalId: 'q1-report',
+        confirmUntyped: true,
       }),
     );
     expect(fetchMock).toHaveBeenCalledWith(

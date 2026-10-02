@@ -3,6 +3,25 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.20.0 — 2026-10-01
+
+### Added
+
+- **Deleting a non-empty folder deletes its contents.** The confirmation dialog checks the folder's actual
+  contents and names what will be removed (the documents, records and sub-folders your account can see, including
+  nested sub-folders), and a
+  progress indicator shows the deletion as it runs. If the deletion stops partway (a network error or a permission
+  change), the dialog reports how much was removed and offers a Retry that continues from where it stopped.
+
+### Changed
+
+- **Adding a document with an External ID asks you to choose a type, or "Untyped (no schema)".** The platform
+  requires a type, or an explicit confirmation that the document is untyped, whenever an External ID is supplied.
+  When your account has document types and you have typed an External ID without opening the Type list, the dialog
+  asks you to choose before it submits. While the types load, or if they cannot be loaded, the dialog says so and
+  holds the submit until they have loaded or you retry. A typed document, or one with no External ID, is unaffected.
+- **Replacing the file of an untyped document that has an External ID confirms that the document is untyped for you.**
+
 ## 0.19.2 — 2026-09-22
 
 ### Security

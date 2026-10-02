@@ -27,7 +27,7 @@
 // useActiveContextId() is safe here.
 // ---------------------------------------------------------------------------
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router';
 import {
   Alert,
@@ -39,6 +39,7 @@ import {
   FormControl,
   IconButton,
   InputLabel,
+  LinearProgress,
   Link,
   MenuItem,
   Paper,
@@ -81,6 +82,12 @@ import { hashKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
 import type { DocumentResponse, FolderResponse } from '../../api/vectrosApi';
+import {
+  CascadeDeletePartialError,
+  planFolderCascadeDelete,
+  runCascadeDelete,
+  type CascadeProgress,
+} from '../../api/cascadeDeleteFolder';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { drainPages } from '../../lib/drainPages';
 import { listAllSchemas } from '../../lib/listAllSchemas';
@@ -177,6 +184,10 @@ export function DocumentsPage(): React.JSX.Element {
     folder?: FolderResponse;
   }>({ open: false, mode: 'create' });
   const [deleteTarget, setDeleteTarget] = useState<FolderResponse | null>(null);
+  const [cascadeProgress, setCascadeProgress] = useState<CascadeProgress | null>(null);
+  // Where `runCascadeDelete` resumes from on Retry — a ref (not state) because
+  // it's read/written from inside the mutation, never rendered directly.
+  const cascadeResumeIndexRef = useRef(0);
   const [addDocOpen, setAddDocOpen] = useState(false);
 
   const foldersQuery = useQuery({
@@ -212,18 +223,85 @@ export function DocumentsPage(): React.JSX.Element {
       ),
   });
 
-  const deleteFolderMutation = useMutation({
-    mutationFn: (id: string) => vectrosApiClient(tenant, context).folders.deleteFolder({ id }),
-    onSuccess: (_data, id) => {
+  // The full cascade plan for `deleteTarget` — every document, record, and
+  // sub-folder inside it, walked recursively. Queried as soon as the delete
+  // dialog opens (not deferred to confirm) so the dialog can show the real
+  // scope of the delete rather than the old best-effort, currently-loaded-page
+  // guess. `staleTime: Infinity` is load-bearing, not a cache-hit optimization:
+  // `cascadeResumeIndexRef` is an index into THIS plan's `steps` array, and a
+  // background refetch mid-cascade (e.g. on reconnect, after the very network
+  // blip that caused a partial failure) would return a SHORTER plan — the
+  // already-deleted steps no longer exist to list — while the ref still holds
+  // an index sized for the old, longer one. Resuming from that stale index
+  // into the new array would skip everything remaining and report success
+  // with the folder never actually emptied. Freezing the plan for the dialog's
+  // lifetime (it's re-queried fresh every time the dialog re-opens, keyed on
+  // folder id) keeps the two in sync by construction.
+  const cascadePlanQuery = useQuery({
+    queryKey: ['cascadeDeletePlan', tenant, context, deleteTarget?.id],
+    queryFn: () =>
+      planFolderCascadeDelete(
+        vectrosApiClient(tenant, context),
+        deleteTarget?.id ?? '',
+        deleteTarget?.name && deleteTarget.name.length > 0
+          ? deleteTarget.name
+          : (deleteTarget?.id ?? ''),
+      ),
+    enabled: deleteTarget?.id !== undefined,
+    staleTime: Infinity,
+  });
+
+  const cascadeDeleteMutation = useMutation({
+    mutationFn: async () => {
+      const plan = cascadePlanQuery.data;
+      if (!plan) throw new Error('This folder’s contents haven’t finished loading yet.');
+      await runCascadeDelete(
+        vectrosApiClient(tenant, context),
+        plan.steps,
+        cascadeResumeIndexRef.current,
+        setCascadeProgress,
+      );
+    },
+    onError: (err) => {
+      if (err instanceof CascadeDeletePartialError) {
+        cascadeResumeIndexRef.current = err.completed;
+        setCascadeProgress({ completed: err.completed, total: err.total });
+      }
+    },
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: dataQueryKeys.folders(tenant, context) });
-      // A document may have referenced the folder — refresh the list too.
       void queryClient.invalidateQueries({ queryKey: dataQueryKeys.documents(tenant, context) });
+      // A folder-scoped listing key drops any records the cascade deleted too.
+      void queryClient.invalidateQueries({ queryKey: ['data', tenant, context, 'records'] });
       // If the just-deleted folder was the active filter, fall back to All so
       // the list doesn't strand on a now-gone folder's empty view (D6).
-      if (folderFilter === id) setFolderFilter(ALL_FOLDERS);
-      setDeleteTarget(null);
+      if (folderFilter === deleteTarget?.id) setFolderFilter(ALL_FOLDERS);
+      closeDeleteDialog();
     },
   });
+
+  const closeDeleteDialog = (): void => {
+    setDeleteTarget(null);
+    setCascadeProgress(null);
+    cascadeResumeIndexRef.current = 0;
+    cascadeDeleteMutation.reset();
+  };
+
+  // The specific "cascaded everything visible, but a folder itself still
+  // refuses to delete" outcome — the one case worth its own message: it means
+  // something is filed in THAT folder (the target, or any sub-folder in its
+  // subtree — every folder in the plan gets its own delete step, and any of
+  // them can hit this the same way) that the current credential can't see
+  // (and therefore couldn't have deleted), so retrying without a broader
+  // credential would just fail the same way again.
+  const cascadeError =
+    cascadeDeleteMutation.error instanceof CascadeDeletePartialError
+      ? cascadeDeleteMutation.error
+      : null;
+  const cascadeStillNotEmpty =
+    cascadeError !== null &&
+    cascadeError.failedStep.kind === 'folder' &&
+    statusCodeOf(cascadeError.cause) === 400;
 
   const folders = foldersQuery.data ?? [];
   const folderTree = orderFoldersAsTree(folders);
@@ -248,7 +326,8 @@ export function DocumentsPage(): React.JSX.Element {
   // A stale `?type=` naming no current document-surface type degrades to the
   // all-types view rather than erroring or filtering to nothing.
   const knownTypeNames = new Set(documentTypes.map((s) => s.typeName));
-  const effectiveType = selectedType !== null && knownTypeNames.has(selectedType) ? selectedType : null;
+  const effectiveType =
+    selectedType !== null && knownTypeNames.has(selectedType) ? selectedType : null;
 
   // The schema that actually governs `effectiveType` for THIS caller — fetched
   // by name through the API's ownership-shadowing walk (the caller's own
@@ -261,7 +340,9 @@ export function DocumentsPage(): React.JSX.Element {
     queryKey: dataQueryKeys.schemaByType(tenant, context, effectiveType ?? ''),
     queryFn: async () =>
       (
-        await vectrosApiClient(tenant, context).schemas.listSchemas({ recordType: effectiveType ?? '' })
+        await vectrosApiClient(tenant, context).schemas.listSchemas({
+          recordType: effectiveType ?? '',
+        })
       ).data?.[0],
     enabled: effectiveType !== null,
   });
@@ -310,7 +391,12 @@ export function DocumentsPage(): React.JSX.Element {
   // over the WHOLE context — the folder filter does not apply to it.
   const lookupActive = appliedLookup !== null && activeSchema !== undefined;
   const lookupKeyFor = (lookup: AppliedLookup | null) =>
-    dataQueryKeys.documentsLookup(tenant, context, activeSchema?.typeName ?? '', JSON.stringify(lookup));
+    dataQueryKeys.documentsLookup(
+      tenant,
+      context,
+      activeSchema?.typeName ?? '',
+      JSON.stringify(lookup),
+    );
   const lookupKey = lookupKeyFor(appliedLookup);
   const lookupQuery = useQuery({
     queryKey: lookupKey,
@@ -363,7 +449,9 @@ export function DocumentsPage(): React.JSX.Element {
   const typedDocuments = useMemo(() => {
     if (lookupActive) return lookupQuery.data ?? [];
     if (effectiveType === null) return documents;
-    return documents.filter((d) => (d.schemaId ? typeNamesById.get(d.schemaId) : undefined) === effectiveType);
+    return documents.filter(
+      (d) => (d.schemaId ? typeNamesById.get(d.schemaId) : undefined) === effectiveType,
+    );
   }, [lookupActive, lookupQuery.data, documents, effectiveType, typeNamesById]);
 
   // Apply the client-side filter (over filterable fields), then the active sort
@@ -373,7 +461,9 @@ export function DocumentsPage(): React.JSX.Element {
     const filtered =
       filterQuery.trim() === '' || filterFieldIds.length === 0
         ? typedDocuments
-        : typedDocuments.filter((d) => payloadMatchesQuery(payloadOf(d), filterQuery, filterFieldIds));
+        : typedDocuments.filter((d) =>
+            payloadMatchesQuery(payloadOf(d), filterQuery, filterFieldIds),
+          );
     if (!sort) return filtered;
     const accessor =
       sort.key === UPDATED_SORT_KEY
@@ -427,21 +517,47 @@ export function DocumentsPage(): React.JSX.Element {
     if (folderId) navigate(`/ai/ask?folderId=${encodeURIComponent(folderId)}`);
   };
 
-  // Best-effort non-empty pre-warning before a folder delete (D1). Sub-folders
-  // are always known (the folder tree is fully loaded); child DOCUMENTS are only
-  // visible when the list isn't scoped to a different folder (server-side
-  // scoping). Child RECORDS are never visible here — this page does not list
-  // records — yet the server counts them when it decides a folder is non-empty,
-  // so a folder holding only records shows NO pre-warning and is then refused.
-  // The server also counts rows the caller cannot read, so the warning can be
-  // absent (or the refusal unexplainable) for a narrowly scoped credential.
-  // The backend's 400 on a non-empty folder is the authoritative guard in every
-  // one of those cases (handled in the dialog's error branch).
-  const canSeeTargetDocs = scopedFolderId === undefined || scopedFolderId === deleteTarget?.id;
-  const deleteTargetHasContents =
-    deleteTarget !== null &&
-    (folders.some((f) => f.parentFolderId === deleteTarget.id) ||
-      (canSeeTargetDocs && documents.some((d) => d.folderId === deleteTarget.id)));
+  // The delete dialog's cascade-scope summary — built from `cascadePlanQuery`,
+  // which walks the target's whole subtree (documents, records, and
+  // sub-folders, recursively), not from whatever this page happens to have
+  // loaded already. So unlike the old best-effort guess, this is accurate
+  // regardless of the current folder filter — modulo the one residual the
+  // cascade itself surfaces directly: a row outside this credential's own
+  // read visibility (see `cascadeStillNotEmpty` above).
+  const cascadePlan = cascadePlanQuery.data;
+  const cascadeItemCount =
+    (cascadePlan?.documentCount ?? 0) +
+    (cascadePlan?.recordCount ?? 0) +
+    (cascadePlan?.subFolderCount ?? 0);
+  const cascadeItemsList = useMemo(() => {
+    if (!cascadePlan) return '';
+    const parts: string[] = [];
+    if (cascadePlan.documentCount > 0) {
+      parts.push(
+        intl.formatMessage(
+          { id: 'documents.folderDeleteCascadeDocumentCount' },
+          { count: cascadePlan.documentCount },
+        ),
+      );
+    }
+    if (cascadePlan.recordCount > 0) {
+      parts.push(
+        intl.formatMessage(
+          { id: 'documents.folderDeleteCascadeRecordCount' },
+          { count: cascadePlan.recordCount },
+        ),
+      );
+    }
+    if (cascadePlan.subFolderCount > 0) {
+      parts.push(
+        intl.formatMessage(
+          { id: 'documents.folderDeleteCascadeSubfolderCount' },
+          { count: cascadePlan.subFolderCount },
+        ),
+      );
+    }
+    return new Intl.ListFormat(intl.locale, { style: 'long', type: 'conjunction' }).format(parts);
+  }, [cascadePlan, intl]);
 
   return (
     <Stack spacing={4}>
@@ -692,133 +808,136 @@ export function DocumentsPage(): React.JSX.Element {
           ) : (
             <Stack spacing={1}>
               <TableContainer component={Paper}>
-              <Table size="small" aria-label={intl.formatMessage({ id: 'documents.tableLabel' })}>
-                <TableHead>
-                  {/* Typed view: title + the schema's payload columns (sortable).
+                <Table size="small" aria-label={intl.formatMessage({ id: 'documents.tableLabel' })}>
+                  <TableHead>
+                    {/* Typed view: title + the schema's payload columns (sortable).
                       All-types view: the stable cross-type columns, with Type
                       resolved from the document's schema. */}
-                  <TableRow>
-                    <TableCell>
-                      <FormattedMessage id="documents.colTitle" />
-                    </TableCell>
-                    {activeSchema ? (
-                      valueColumns.map((col) => sortableHeader(col.fieldId, col.label))
-                    ) : (
+                    <TableRow>
                       <TableCell>
-                        <FormattedMessage id="documents.colType" />
-                      </TableCell>
-                    )}
-                    <TableCell>
-                      <FormattedMessage id="documents.colStatus" />
-                    </TableCell>
-                    <TableCell>
-                      <FormattedMessage id="documents.colIndex" />
-                    </TableCell>
-                    <TableCell>
-                      <FormattedMessage id="documents.colFolder" />
-                    </TableCell>
-                    {!activeSchema && (
-                      <TableCell align="right">
-                        <FormattedMessage id="documents.colSize" />
-                      </TableCell>
-                    )}
-                    {activeSchema ? (
-                      sortableHeader(UPDATED_SORT_KEY, <FormattedMessage id="documents.colUpdated" />)
-                    ) : (
-                      <TableCell>
-                        <FormattedMessage id="documents.colUpdated" />
-                      </TableCell>
-                    )}
-                    <TableCell align="right">
-                      <FormattedMessage id="documents.colActions" />
-                    </TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {displayedDocuments.map((d) => (
-                    <TableRow key={d.id} hover>
-                      <TableCell>
-                        {d.id ? (
-                          <Link
-                            component={RouterLink}
-                            to={`/documents/${encodeURIComponent(d.id)}`}
-                          >
-                            {d.title && d.title.length > 0
-                              ? d.title
-                              : intl.formatMessage({ id: 'documents.untitled' })}
-                          </Link>
-                        ) : (
-                          (d.title ?? '—')
-                        )}
+                        <FormattedMessage id="documents.colTitle" />
                       </TableCell>
                       {activeSchema ? (
-                        valueColumns.map((col) => (
-                          <TableCell key={col.fieldId}>
-                            {formatCellValue(payloadOf(d)?.[col.fieldId])}
-                          </TableCell>
-                        ))
+                        valueColumns.map((col) => sortableHeader(col.fieldId, col.label))
                       ) : (
                         <TableCell>
-                          {(d.schemaId ? typeNamesById.get(d.schemaId) : undefined) ?? '—'}
+                          <FormattedMessage id="documents.colType" />
                         </TableCell>
                       )}
-                      <TableCell>{documentStatusLabel(intl, d.status)}</TableCell>
                       <TableCell>
-                        {d.indexStatus ? (
-                          <IndexStatusChip
-                            label={documentIndexStatusLabel(intl, d.indexStatus)}
-                            color={documentIndexStatusColor(d.indexStatus)}
-                            failureMessage={d.indexFailure?.message}
-                          />
-                        ) : (
-                          '—'
-                        )}
+                        <FormattedMessage id="documents.colStatus" />
                       </TableCell>
                       <TableCell>
-                        {d.folderId ? (folderNameById.get(d.folderId) ?? d.folderId) : '—'}
+                        <FormattedMessage id="documents.colIndex" />
+                      </TableCell>
+                      <TableCell>
+                        <FormattedMessage id="documents.colFolder" />
                       </TableCell>
                       {!activeSchema && (
-                        <TableCell align="right">{formatBytes(d.fileSize)}</TableCell>
+                        <TableCell align="right">
+                          <FormattedMessage id="documents.colSize" />
+                        </TableCell>
                       )}
-                      <TableCell>
-                        {d.lastModified ? (
-                          <FormattedDate
-                            value={d.lastModified}
-                            year="numeric"
-                            month="short"
-                            day="numeric"
-                            hour="2-digit"
-                            minute="2-digit"
-                          />
-                        ) : (
-                          '—'
-                        )}
-                      </TableCell>
+                      {activeSchema ? (
+                        sortableHeader(
+                          UPDATED_SORT_KEY,
+                          <FormattedMessage id="documents.colUpdated" />,
+                        )
+                      ) : (
+                        <TableCell>
+                          <FormattedMessage id="documents.colUpdated" />
+                        </TableCell>
+                      )}
                       <TableCell align="right">
-                        {d.id && (
-                          <Tooltip title={intl.formatMessage({ id: 'documents.askDocument' })}>
-                            <IconButton
-                              size="small"
-                              onClick={() => setAskTarget(d)}
-                              aria-label={intl.formatMessage(
-                                { id: 'documents.askDocumentAria' },
-                                {
-                                  title:
-                                    d.title && d.title.length > 0
-                                      ? d.title
-                                      : intl.formatMessage({ id: 'documents.untitled' }),
-                                },
-                              )}
-                            >
-                              <QuestionAnswerOutlined fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        )}
+                        <FormattedMessage id="documents.colActions" />
                       </TableCell>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHead>
+                  <TableBody>
+                    {displayedDocuments.map((d) => (
+                      <TableRow key={d.id} hover>
+                        <TableCell>
+                          {d.id ? (
+                            <Link
+                              component={RouterLink}
+                              to={`/documents/${encodeURIComponent(d.id)}`}
+                            >
+                              {d.title && d.title.length > 0
+                                ? d.title
+                                : intl.formatMessage({ id: 'documents.untitled' })}
+                            </Link>
+                          ) : (
+                            (d.title ?? '—')
+                          )}
+                        </TableCell>
+                        {activeSchema ? (
+                          valueColumns.map((col) => (
+                            <TableCell key={col.fieldId}>
+                              {formatCellValue(payloadOf(d)?.[col.fieldId])}
+                            </TableCell>
+                          ))
+                        ) : (
+                          <TableCell>
+                            {(d.schemaId ? typeNamesById.get(d.schemaId) : undefined) ?? '—'}
+                          </TableCell>
+                        )}
+                        <TableCell>{documentStatusLabel(intl, d.status)}</TableCell>
+                        <TableCell>
+                          {d.indexStatus ? (
+                            <IndexStatusChip
+                              label={documentIndexStatusLabel(intl, d.indexStatus)}
+                              color={documentIndexStatusColor(d.indexStatus)}
+                              failureMessage={d.indexFailure?.message}
+                            />
+                          ) : (
+                            '—'
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {d.folderId ? (folderNameById.get(d.folderId) ?? d.folderId) : '—'}
+                        </TableCell>
+                        {!activeSchema && (
+                          <TableCell align="right">{formatBytes(d.fileSize)}</TableCell>
+                        )}
+                        <TableCell>
+                          {d.lastModified ? (
+                            <FormattedDate
+                              value={d.lastModified}
+                              year="numeric"
+                              month="short"
+                              day="numeric"
+                              hour="2-digit"
+                              minute="2-digit"
+                            />
+                          ) : (
+                            '—'
+                          )}
+                        </TableCell>
+                        <TableCell align="right">
+                          {d.id && (
+                            <Tooltip title={intl.formatMessage({ id: 'documents.askDocument' })}>
+                              <IconButton
+                                size="small"
+                                onClick={() => setAskTarget(d)}
+                                aria-label={intl.formatMessage(
+                                  { id: 'documents.askDocumentAria' },
+                                  {
+                                    title:
+                                      d.title && d.title.length > 0
+                                        ? d.title
+                                        : intl.formatMessage({ id: 'documents.untitled' }),
+                                  },
+                                )}
+                              >
+                                <QuestionAnswerOutlined fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </TableContainer>
               {/* A lookup returns one page (the API max) — say so when it's full,
                   or a "complete" -looking result quietly drops the tail. */}
@@ -859,49 +978,87 @@ export function DocumentsPage(): React.JSX.Element {
 
       <ConfirmDialog
         open={deleteTarget !== null}
-        onClose={() => {
-          setDeleteTarget(null);
-          deleteFolderMutation.reset(); // drop a prior failure so reopening starts clean
-        }}
-        onConfirm={() => deleteTarget?.id && deleteFolderMutation.mutate(deleteTarget.id)}
-        pending={deleteFolderMutation.isPending}
+        onClose={closeDeleteDialog}
+        onConfirm={() => cascadeDeleteMutation.mutate()}
+        pending={cascadePlanQuery.isPending || cascadeDeleteMutation.isPending}
+        confirmDisabled={cascadePlanQuery.isPending || cascadePlanQuery.isError}
         title={<FormattedMessage id="documents.folderDeleteTitle" />}
         body={
-          <>
-            <FormattedMessage
-              id="documents.folderDeleteBody"
-              values={{ name: deleteTarget?.name ?? deleteTarget?.id ?? '' }}
-            />
-            {deleteTargetHasContents && (
-              // `component="span"` (+ block display): the dialog wraps `body` in
-              // a DialogContentText (<p>), and a <p> can't contain another <p>.
-              <Typography
-                component="span"
-                variant="body2"
-                color="warning.main"
-                sx={{ display: 'block', mt: 1 }}
-              >
-                <FormattedMessage id="documents.folderDeleteNonEmpty" />
-              </Typography>
-            )}
-          </>
-        }
-        confirmLabel={<FormattedMessage id="documents.folderDeleteConfirm" />}
-        cancelLabel={<FormattedMessage id="folderEditor.cancel" />}
-        error={
-          deleteFolderMutation.isError ? (
-            <>
-              {/* A 400 on folder-delete means the folder isn't empty — say so
-                  (a generic "try again" would never succeed); else the default. */}
+          cascadeDeleteMutation.isPending || cascadeProgress !== null ? (
+            <Stack spacing={1}>
               <FormattedMessage
-                id={
-                  statusCodeOf(deleteFolderMutation.error) === 400
-                    ? 'documents.folderDeleteNonEmptyError'
-                    : 'documents.folderDeleteError'
+                id="documents.folderDeleteProgress"
+                values={{
+                  completed: cascadeProgress?.completed ?? 0,
+                  total: cascadeProgress?.total ?? 0,
+                }}
+              />
+              <LinearProgress
+                variant="determinate"
+                value={
+                  cascadeProgress && cascadeProgress.total > 0
+                    ? (cascadeProgress.completed / cascadeProgress.total) * 100
+                    : 0
                 }
               />
-              <RequestIdCaption error={deleteFolderMutation.error} />
+            </Stack>
+          ) : cascadePlanQuery.isPending ? (
+            <FormattedMessage id="documents.folderDeleteChecking" />
+          ) : (
+            <>
+              <FormattedMessage
+                id="documents.folderDeleteBody"
+                values={{ name: deleteTarget?.name ?? deleteTarget?.id ?? '' }}
+              />
+              {cascadeItemCount > 0 && (
+                // `component="span"` (+ block display): the dialog wraps `body` in
+                // a DialogContentText (<p>), and a <p> can't contain another <p>.
+                <Typography
+                  component="span"
+                  variant="body2"
+                  color="warning.main"
+                  sx={{ display: 'block', mt: 1 }}
+                >
+                  <FormattedMessage
+                    id="documents.folderDeleteNonEmpty"
+                    values={{ itemsList: cascadeItemsList }}
+                  />
+                </Typography>
+              )}
             </>
+          )
+        }
+        confirmLabel={
+          cascadeError !== null ? (
+            <FormattedMessage id="documents.folderDeleteRetry" />
+          ) : (
+            <FormattedMessage id="documents.folderDeleteConfirm" />
+          )
+        }
+        cancelLabel={<FormattedMessage id="folderEditor.cancel" />}
+        error={
+          cascadePlanQuery.isError ? (
+            <FormattedMessage id="documents.folderDeleteCheckError" />
+          ) : cascadeDeleteMutation.isError && cascadeStillNotEmpty ? (
+            // The one outcome worth its own copy: everything visible was
+            // cascaded, but the folder itself still refuses to delete —
+            // something outside this credential's read visibility is still
+            // filed there.
+            <>
+              <FormattedMessage id="documents.folderDeleteNonEmptyError" />
+              <RequestIdCaption error={cascadeError?.cause} />
+            </>
+          ) : cascadeError !== null ? (
+            <>
+              <FormattedMessage
+                id="documents.folderDeletePartialError"
+                values={{ completed: cascadeError.completed, total: cascadeError.total }}
+              />
+              <RequestIdCaption error={cascadeError.cause} />
+            </>
+          ) : cascadeDeleteMutation.isError ? (
+            // A non-cascade failure (e.g. the plan hadn't finished loading).
+            <FormattedMessage id="documents.folderDeleteError" />
           ) : undefined
         }
       />

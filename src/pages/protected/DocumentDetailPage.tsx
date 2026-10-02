@@ -57,7 +57,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
-import type { FolderResponse, Vectros } from '../../api/vectrosApi';
+import type { FolderResponse } from '../../api/vectrosApi';
 import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import {
   documentIndexStatusColor,
@@ -164,14 +164,10 @@ export function DocumentDetailPage(): React.JSX.Element {
   // Archive / restore — the document lifecycle `status`. Archiving soft-
   // retracts the document (pulled from search + AI recall, kept + recoverable);
   // restoring re-indexes it. PATCH sends ONLY the status: merge-patch preserves
-  // omitted fields, so no title carry-forward is needed (the shared
-  // DocumentRequest type requires `title` for PUT, hence the cast).
+  // omitted fields, so no title carry-forward is needed.
   const statusMutation = useMutation({
     mutationFn: (status: 'ACTIVE' | 'ARCHIVED') =>
-      vectrosApiClient(tenant, context).documents.patchDocument({
-        id: documentId,
-        body: { status } as Vectros.DocumentRequest,
-      }),
+      vectrosApiClient(tenant, context).documents.patchDocument({ id: documentId, status }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: dataQueryKeys.document(tenant, context, documentId) });
       void queryClient.invalidateQueries({ queryKey: dataQueryKeys.documents(tenant, context) });
@@ -215,6 +211,9 @@ export function DocumentDetailPage(): React.JSX.Element {
         // re-upload must name the same schema to match the existing document
         // (instead of falling through to a fresh, schemaless create).
         ...(doc.schemaId ? { schemaId: doc.schemaId } : {}),
+        // An untyped document has no schema to name, and the API refuses an externalId without one
+        // unless an untyped document is confirmed as intended. Here it is: this page is showing one.
+        ...(doc.schemaId ? {} : { confirmUntyped: true }),
       });
       try {
         // The URL came from the API and the bytes go to whatever it names, so only an https address is

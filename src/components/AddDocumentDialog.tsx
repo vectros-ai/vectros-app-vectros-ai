@@ -37,6 +37,7 @@ import {
   DialogTitle,
   FormControl,
   FormControlLabel,
+  FormHelperText,
   InputLabel,
   LinearProgress,
   MenuItem,
@@ -120,6 +121,9 @@ export function AddDocumentDialog({
   // so the picker offers one option per distinct type name and the actual
   // schema to bind is resolved separately below.
   const [selectedTypeName, setSelectedTypeName] = useState<string>(NO_TYPE);
+  // Whether the user has looked at the Type list. The selector DEFAULTS to "Untyped", so a value nobody
+  // touched is a default, not a choice; see `needsExplicitType`.
+  const [typeTouched, setTypeTouched] = useState(false);
   // Typed metadata (the document `payload`), edited via the schema-driven form
   // when a type is selected. Reset alongside the type — fields belong to it.
   const [payload, setPayload] = useState<Record<string, unknown>>({});
@@ -146,6 +150,15 @@ export function AddDocumentDialog({
   // base + the caller's own variant would otherwise render two
   // indistinguishable, identically-labeled options for the same type).
   const docTypeOptions = distinctTypes(docTypes);
+  // An External ID on a document left at the defaulted "Untyped", while the Type list is on screen and was
+  // never opened: ask for an explicit choice instead of confirming one on the user's behalf. While the types
+  // are still loading, or if loading them failed, the list is not on screen, so that counts too: a tenant that
+  // has types must not be confirmed untyped because the answer was slow or never came.
+  const needsExplicitType =
+    (docTypes.length > 0 || schemasQuery.isPending || schemasQuery.isError) &&
+    selectedTypeName === NO_TYPE &&
+    externalId.trim() !== '' &&
+    !typeTouched;
   // The schema that actually governs `selectedTypeName` for THIS caller,
   // resolved by name through the API's ownership-shadowing walk (the caller's
   // own variant when one exists, otherwise the shared base) — never picked
@@ -181,6 +194,7 @@ export function AddDocumentDialog({
     setFolderId(defaultFolderId ?? NO_FOLDER);
     // Adding from a by-type view pre-selects that type (still changeable).
     setSelectedTypeName(defaultTypeName ?? NO_TYPE);
+    setTypeTouched(false);
     setPayload({});
     setExternalId('');
     setUpsert(false);
@@ -200,6 +214,15 @@ export function AddDocumentDialog({
         selectedTypeName === NO_TYPE || !resolvedSchemaId ? {} : { schemaId: resolvedSchemaId };
       const payloadPart =
         selectedTypeName !== NO_TYPE && Object.keys(payload).length > 0 ? { payload } : {};
+      // The API refuses an externalId that arrives without a schemaId unless the caller confirms an untyped
+      // document is intended (externalId is unique per schema, so a forgotten type would otherwise mint a
+      // second, untyped copy). The Type selector defaults to "Untyped", so that default alone is NOT a
+      // confirmation: the flag goes out once the user has made the choice, or when there is no choice to make
+      // (the tenant has no document types). `needsExplicitType` holds the submit back until then.
+      const confirmUntypedPart =
+        selectedTypeName === NO_TYPE && externalId.trim() !== '' && !needsExplicitType
+          ? { confirmUntyped: true }
+          : {};
 
       if (mode === 'upload') {
         if (!file) throw new Error('no file selected');
@@ -218,6 +241,7 @@ export function AddDocumentDialog({
           ...payloadPart,
           ...folderPart,
           ...externalIdPart,
+          ...confirmUntypedPart,
         });
         // A document row EXISTS from here on, so every failure below has to undo
         // it — otherwise a failed upload leaves behind a document with no file in
@@ -282,6 +306,7 @@ export function AddDocumentDialog({
         // erased but its state persists, and upsert is meaningless without
         // the identity key it matches on.
         ...(upsert && externalId.trim() !== '' ? { upsert: true } : {}),
+        ...confirmUntypedPart,
         body: {
           title: title.trim(),
           text,
@@ -317,6 +342,7 @@ export function AddDocumentDialog({
   const canSubmit =
     !mutation.isPending &&
     typeReady &&
+    !needsExplicitType &&
     Object.keys(fieldErrors).length === 0 &&
     (mode === 'upload'
       ? file !== null && !fileTooLarge
@@ -437,7 +463,9 @@ export function AddDocumentDialog({
                 labelId="add-doc-type-label"
                 label={intl.formatMessage({ id: 'addDocument.typeLabel' })}
                 value={selectedTypeName}
+                onOpen={() => setTypeTouched(true)}
                 onChange={(e: SelectChangeEvent) => {
+                  setTypeTouched(true);
                   setSelectedTypeName(e.target.value);
                   setPayload({}); // metadata fields belong to the selected type
                 }}
@@ -451,6 +479,11 @@ export function AddDocumentDialog({
                   </MenuItem>
                 ))}
               </Select>
+              {needsExplicitType && (
+                <FormHelperText>
+                  <FormattedMessage id="addDocument.typeNeedsChoice" />
+                </FormHelperText>
+              )}
             </FormControl>
           )}
 
@@ -512,6 +545,21 @@ export function AddDocumentDialog({
             size="small"
             helperText={intl.formatMessage({ id: 'addDocument.externalIdHelp' })}
           />
+          {needsExplicitType && schemasQuery.isPending && (
+            <FormHelperText>
+              <FormattedMessage id="addDocument.typesLoading" />
+            </FormHelperText>
+          )}
+          {needsExplicitType && schemasQuery.isError && (
+            <Stack direction="row" spacing={1} alignItems="center">
+              <FormHelperText error>
+                <FormattedMessage id="addDocument.typesFailed" />
+              </FormHelperText>
+              <Button size="small" onClick={() => void schemasQuery.refetch()}>
+                <FormattedMessage id="addDocument.typesRetry" />
+              </Button>
+            </Stack>
+          )}
           {mode === 'ingest' && externalId.trim() !== '' && (
             <FormControlLabel
               control={<Switch checked={upsert} onChange={(e) => setUpsert(e.target.checked)} />}
