@@ -3,6 +3,49 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.21.0 — 2026-10-12
+
+### Added
+
+- **Route a call to your own model provider from Ask, Chat and "Ask this document".** Each screen has an optional
+  "Provider alias" field. Leave it blank and the call uses the platform-hosted models. Type the alias of an active
+  provider configuration on your account and that one call is served by your account owner's own model provider
+  instead. The account owner manages provider configurations and the risk waiver in the developer portal; the app only
+  handles the alias you type, never the provider's endpoint or key, and does not store the alias between visits. The
+  alias on "Ask this document" is cleared each time the drawer opens. The alias and model are trimmed and stripped of
+  invisible characters (such as a zero-width space picked up when pasting).
+- **A notice while an alias is set.** The screen states that the call will be served by your account owner's own model
+  provider, not a Vectros-hosted model, that your request and the content used to answer it leave the Vectros perimeter,
+  and that the provider's own terms apply and its own billing may apply. Assistive technology announces the notice.
+- **A provider model field in place of the model picker.** With an alias set, the platform model list and its credit
+  rates are replaced by an optional "Provider model" field for a model id on your provider. Leave it blank to use the
+  provider configuration's default model. The model you typed is cleared when you clear or change the alias, so it is
+  never sent to a different provider.
+- **Readable errors for a provider-routed call.** A refused call (HTTP 403) lists what to check: the alias spelling (it
+  is case-sensitive), that its provider configuration is active and belongs to this app's environment, that your account
+  owner has accepted the risk waiver and, if your account has accepted the Business Associate Agreement with Vectros in
+  the developer portal, that your account owner has also attested that provider configuration there; it also says that
+  your access may not allow the action. A request rejected as invalid (HTTP 400) shows the API's own message and, when
+  no Provider model was entered, adds that the configuration may have no default model. Any other HTTP error shows the
+  API's own message, or a short line with the status.
+
+### Changed
+
+- **The model controls moved.** On Ask they sit above the retrieval scope controls, on their own row; on Chat and "Ask
+  this document" the Provider alias field sits beside the model picker.
+- **The Chat empty-state line now says "Start a conversation. This app doesn't save messages: they live only in this session."**
+- **Built against SDK 0.47.0.** The model picker has always used the default model reported by `GET /v1/models`, so Ask, Chat and "Ask this document" use Claude Haiku 5.5 once the platform reports it as the default. See the
+  [SDK changelog](https://github.com/vectros-ai/vectros-api-spec/blob/main/CHANGELOG.md) for the full release.
+- **The comment in the served `index.html` says forks can re-brand the app by editing one file.**
+
+### Security
+
+- **Build and test dependencies updated to patched releases.** `brace-expansion`, `js-yaml`, `nanoid`, `undici` and `vitest` (with its coverage plugin) now resolve to versions that fix their published advisories, and `postcss` is raised so that the patched `nanoid` is the one it uses. These
+  packages are used while building and testing the app and are not part of the built app, so the app's behavior is
+  unchanged. If you forked the app, the `overrides` block in `package.json` keeps the patched floors for `js-yaml`,
+  `nanoid`, `postcss` and `undici` in place when you regenerate your lockfile. `brace-expansion` is fixed in the
+  committed lockfile, and `vitest` with its coverage plugin by their exact `devDependencies` pins.
+
 ## 0.20.0 — 2026-10-01
 
 ### Added

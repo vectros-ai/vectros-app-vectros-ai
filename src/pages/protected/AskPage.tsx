@@ -51,9 +51,9 @@ import { drainPages } from '../../lib/drainPages';
 import { folderMenuItems } from '../../components/folderMenuItems';
 import { OwnershipScopeFilter } from '../../components/OwnershipScopeFilter';
 import { ownershipScopeQueryArgs } from '../../lib/ownershipScopes';
-import { ModelPicker } from '../../components/ModelPicker';
+import { InferenceRouting } from '../../components/InferenceRouting';
 import { InferenceErrorAlert } from '../../components/InferenceErrorAlert';
-import { useInferenceModels } from '../../hooks/useInferenceModels';
+import { useInferenceRouting } from '../../hooks/useInferenceRouting';
 
 /** Folder-filter sentinel meaning "the whole context" (no folder scope). */
 const ALL_FOLDERS = 'ALL';
@@ -99,15 +99,8 @@ export function AskPage(): React.JSX.Element {
   const context = useActiveContextId();
   const intl = useIntl();
   const [query, setQuery] = useState('');
-  const [model, setModel] = useState<string | undefined>(undefined);
+  const routing = useInferenceRouting();
   const { state, run, cancel, isStreaming } = useInferenceStream();
-  const modelsQuery = useInferenceModels();
-
-  // Seed the model from the registry default once it loads (mirrors ChatPage).
-  useEffect(() => {
-    const def = modelsQuery.data?.defaultModel;
-    if (model === undefined && def) setModel(def);
-  }, [model, modelsQuery.data]);
 
   // Retrieval scope: narrow RAG to a folder and/or content type via
   // RagSearch. Default is the whole context (no folderId, all content types) —
@@ -169,11 +162,13 @@ export function AskPage(): React.JSX.Element {
     const search = buildSearch();
     const request: Vectros.RagRequest = {
       query: q,
-      ...(model !== undefined ? { model } : {}),
+      ...routing.requestFields(),
       ...(search ? { search } : {}),
     };
     run(({ abortSignal }) =>
-      vectrosApiClient(tenant, context).inference.ragInference(request, { abortSignal }),
+      routing.guard(() =>
+        vectrosApiClient(tenant, context).inference.ragInference(request, { abortSignal }),
+      ),
     );
   };
 
@@ -198,9 +193,8 @@ export function AskPage(): React.JSX.Element {
           <FormattedMessage id="ai.ask.foldersError" />
         </ApiErrorAlert>
       )}
+      <InferenceRouting routing={routing} disabled={isStreaming} />
       <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, alignItems: 'center' }}>
-        <ModelPicker value={model} onChange={setModel} disabled={isStreaming} />
-
         {/* Retrieval scope: exact folder + content type, fed to RagSearch. */}
         {folders.length > 0 && (
           <FormControl size="small" sx={{ minWidth: 200 }} disabled={isStreaming}>

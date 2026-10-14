@@ -30,9 +30,9 @@ import { useInferenceStream } from '@vectros-ai/react';
 import { useActiveContextId, useActiveTenantId } from '../auth';
 import { vectrosApiClient } from '../api/vectrosApi';
 import type { Vectros } from '../api/vectrosApi';
-import { ModelPicker } from './ModelPicker';
+import { InferenceRouting } from './InferenceRouting';
 import { InferenceErrorAlert } from './InferenceErrorAlert';
-import { useInferenceModels } from '../hooks/useInferenceModels';
+import { useInferenceRouting } from '../hooks/useInferenceRouting';
 
 interface DocumentAskDrawerProps {
   readonly open: boolean;
@@ -51,22 +51,20 @@ export function DocumentAskDrawer({
   const context = useActiveContextId();
   const intl = useIntl();
   const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState<string | undefined>(undefined);
+  const routing = useInferenceRouting();
   const { state, run, cancel, reset, isStreaming } = useInferenceStream();
-  const modelsQuery = useInferenceModels();
-
-  useEffect(() => {
-    const def = modelsQuery.data?.defaultModel;
-    if (model === undefined && def) setModel(def);
-  }, [model, modelsQuery.data]);
 
   // Each time the drawer opens, start clean (no stale answer from a prior doc).
+  // The provider alias is cleared too: sending a document to your own model
+  // provider is chosen per question, and must not carry over to the next document.
+  const { clearProvider } = routing;
   useEffect(() => {
     if (open) {
       setPrompt('');
       reset();
+      clearProvider();
     }
-  }, [open, reset]);
+  }, [open, reset, clearProvider]);
 
   const ask = (): void => {
     const p = prompt.trim();
@@ -74,10 +72,12 @@ export function DocumentAskDrawer({
     const request: Vectros.DocumentAskRequest = {
       id: documentId,
       prompt: p,
-      ...(model !== undefined ? { model } : {}),
+      ...routing.requestFields(),
     };
     run(({ abortSignal }) =>
-      vectrosApiClient(tenant, context).inference.documentAsk(request, { abortSignal }),
+      routing.guard(() =>
+        vectrosApiClient(tenant, context).inference.documentAsk(request, { abortSignal }),
+      ),
     );
   };
 
@@ -114,7 +114,7 @@ export function DocumentAskDrawer({
           </Typography>
         )}
 
-        <ModelPicker value={model} onChange={setModel} disabled={isStreaming} />
+        <InferenceRouting routing={routing} disabled={isStreaming} />
 
         <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
           <TextField

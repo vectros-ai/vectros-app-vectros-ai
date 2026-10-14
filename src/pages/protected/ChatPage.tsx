@@ -30,9 +30,9 @@ import { useInferenceStream } from '@vectros-ai/react';
 import { useActiveContextId, useActiveTenantId } from '../../auth';
 import { vectrosApiClient } from '../../api/vectrosApi';
 import type { Vectros } from '../../api/vectrosApi';
-import { ModelPicker } from '../../components/ModelPicker';
+import { InferenceRouting } from '../../components/InferenceRouting';
 import { InferenceErrorAlert } from '../../components/InferenceErrorAlert';
-import { useInferenceModels } from '../../hooks/useInferenceModels';
+import { useInferenceRouting } from '../../hooks/useInferenceRouting';
 
 interface ChatTurn {
   readonly role: 'user' | 'assistant';
@@ -73,16 +73,9 @@ export function ChatPage(): React.JSX.Element {
   const intl = useIntl();
   const [messages, setMessages] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState('');
-  const [model, setModel] = useState<string | undefined>(undefined);
+  const routing = useInferenceRouting();
   const { state, run, cancel, reset, isStreaming } = useInferenceStream();
-  const modelsQuery = useInferenceModels();
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  // Seed the model from the registry default once it loads.
-  useEffect(() => {
-    const def = modelsQuery.data?.defaultModel;
-    if (model === undefined && def) setModel(def);
-  }, [model, modelsQuery.data]);
 
   // Commit the streamed answer to the thread when a run completes, then reset.
   // Skip a content-less reply (e.g. an empty model response) — no blank bubble.
@@ -109,10 +102,12 @@ export function ChatPage(): React.JSX.Element {
     setInput('');
     const request: Vectros.ChatRequest = {
       messages: next.map((m) => ({ role: m.role, content: m.content })),
-      ...(model !== undefined ? { model } : {}),
+      ...routing.requestFields(),
     };
     run(({ abortSignal }) =>
-      vectrosApiClient(tenant, context).inference.chatInference(request, { abortSignal }),
+      routing.guard(() =>
+        vectrosApiClient(tenant, context).inference.chatInference(request, { abortSignal }),
+      ),
     );
   };
 
@@ -129,9 +124,7 @@ export function ChatPage(): React.JSX.Element {
 
   return (
     <Stack spacing={2}>
-      <Box sx={{ alignSelf: 'flex-start' }}>
-        <ModelPicker value={model} onChange={setModel} disabled={isStreaming} />
-      </Box>
+      <InferenceRouting routing={routing} disabled={isStreaming} />
 
       <Stack spacing={1.5} sx={{ minHeight: 200 }}>
         {isEmpty ? (

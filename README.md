@@ -23,11 +23,11 @@ Fork it. Re-brand it in one file. Point it at your own Cognito pool. Ship.
 | Capability | Implementation note |
 |---|---|
 | Context switcher | Pick any AppContext you can reach across your live/test environments; every query keys on `(tenant, context)` and a switch re-mints the scoped bearer. |
-| Records explorer + editor | Browse by type with schema-driven columns, client-side sort/filter, and server-side lookups (exact / range / prefix on a single lookup field, or an exact match across every field of a composite lookup declared over several — optionally narrowed further by a sort-key window on an exact match); create/edit in a dual-mode (typed form / raw JSON) editor with optimistic-concurrency conflict handling; archive/restore. |
+| Records explorer + editor | Browse by type with schema-driven columns, client-side sort/filter, and server-side lookups (exact / range / prefix on a single lookup field, or a match on a composite lookup declared over several fields, on every field or only the leading ones with the rest left blank — optionally narrowed further by a sort-key window on an exact match); create/edit in a dual-mode (typed form / raw JSON) editor with optimistic-concurrency conflict handling; archive/restore. |
 | Documents | Browse by type and folder, look up by external ID or schema lookup fields (optionally narrowed by a sort-key window on an exact match), typed metadata, an in-app Markdown viewer (with click-to-view for file-backed documents), signed downloads, create via file upload or text ingest (optional external IDs + update-if-exists), archive/restore, and replace-a-file with automatic re-extraction and re-indexing. |
 | Folders | Create/rename/delete with server-side folder-scoped listing and "ask this folder" deep links into the AI workspace. |
 | Hybrid search | One ranked result set across records and documents: ranking mode (hybrid/semantic/keyword), content-source, folder, type, and owner-scope filters (narrow by several ownership dimensions at once, e.g. `org:acme, client:pilot`), offset paging. |
-| AI workspace | Multi-turn chat over the context's data, single-shot ask with citations, and per-document Q&A — all streaming, with a model picker. |
+| AI workspace | Multi-turn chat over the context's data, single-shot ask with citations, and per-document Q&A — all streaming, with a model picker, or an optional provider alias to route a call to your own model provider (the screen says the call leaves the Vectros perimeter). |
 | Version history | The audit trail (who changed what, when) on every record and document detail. |
 | Cognito authentication | Amplify v6 against the Vectros developer user pool, via `@vectros-ai/react`'s `CognitoAuthProvider`. Sign-in + MFA challenge only — account setup lives in the admin app. |
 | Protected routing + app shell | `RequireAuth` guard and `AppLayout` (skip-link, responsive drawer, user menu) from `@vectros-ai/react`. |
@@ -54,7 +54,7 @@ exactly so the reference apps share one set of conventions:
 
 ## Quick start (local development)
 
-Prerequisites: Node 22.22+ (see [`.nvmrc`](.nvmrc)), npm 10+.
+Prerequisites: Node 22.22+ (see `engines` in [`package.json`](package.json)), npm 10+.
 
 ```bash
 npm install
@@ -123,7 +123,7 @@ our separation of concerns.
 |---|---|
 | **Context is unspoofable** | The active AppContext is the `context_id` claim baked into the `st_*` token by the per-context mint — never a request parameter. Switching context = swapping the token. A user cannot reach a context they aren't entitled to even by editing client state. |
 | **Cognito tokens at rest** | Stored by Amplify in browser `localStorage` (default), mitigated by a strict CSP that blocks third-party + inline scripts. |
-| **CSP** | Set at the CloudFront edge (not `<meta>` tags). Strict — no inline scripts, no third-party origins beyond Cognito + the Vectros API host. |
+| **CSP** | Set at the CloudFront edge (not `<meta>` tags). Strict — no inline scripts, no third-party origins beyond Cognito, the Vectros API host and the signed-asset and upload storage origins. |
 | **HSTS** | Preload-ready (`max-age=63072000; includeSubDomains; preload`) on the production distribution. |
 | **No PII in logs** | The global `unhandledrejection` / `error` listeners log to `console.error` only — no email, name, or URL query params. |
 

@@ -13,6 +13,7 @@ import { AskPage } from './AskPage';
 import { CurrentContextProvider } from '../../auth/CurrentContextProvider';
 import { TestProviders } from '../../test/TestProviders';
 import { pageOf } from '../../test/pageOf';
+import { statusError } from '../../test/statusError';
 
 vi.mock('../../api/vectrosApi', () => ({ vectrosApiClient: vi.fn() }));
 import { vectrosApiClient } from '../../api/vectrosApi';
@@ -83,6 +84,12 @@ function renderPage(path = '/ai/ask'): void {
       </CurrentTenantProvider>
     </TestProviders>,
   );
+}
+
+/** A stream that yields one delta and then never ends (the call is still running). */
+async function* NEVER_ENDING_STREAM(): AsyncGenerator<unknown> {
+  yield { event: 'content_delta', delta: 'Partial' };
+  await new Promise<never>(() => undefined);
 }
 
 describe('AskPage', () => {
@@ -425,5 +432,191 @@ describe('AskPage', () => {
     await waitFor(() => expect(ragInference).toHaveBeenCalled());
     const req = ragInference.mock.calls[0]?.[0] as { search?: unknown };
     expect(req.search).toBeUndefined(); // never scoped to the deleted folder
+  });
+
+  describe('provider alias', () => {
+    async function ask(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+      await user.type(screen.getByRole('textbox', { name: /ask a question/i }), 'What is X?');
+      await user.click(screen.getByRole('button', { name: 'Ask' }));
+    }
+
+    it('sends no providerAlias, and the registry model, when no alias is typed', async () => {
+      const user = userEvent.setup();
+      const ragInference = stubRag(() => Promise.resolve(ragStream()));
+      renderPage();
+      await ask(user);
+
+      await waitFor(() => expect(ragInference).toHaveBeenCalled());
+      const req = ragInference.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(req).not.toHaveProperty('providerAlias');
+      expect(req.model).toBe('haiku');
+    });
+
+    it('sends the alias and the typed provider model, not the registry model', async () => {
+      const user = userEvent.setup();
+      const ragInference = stubRag(() => Promise.resolve(ragStream()));
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'my-provider');
+      await user.type(screen.getByRole('textbox', { name: /provider model/i }), 'provider-model-1');
+      await ask(user);
+
+      await waitFor(() => expect(ragInference).toHaveBeenCalled());
+      const req = ragInference.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(req.providerAlias).toBe('my-provider');
+      expect(req.model).toBe('provider-model-1');
+      expect(req.query).toBe('What is X?');
+    });
+
+    it('omits model, so the provider default applies, when only an alias is typed', async () => {
+      const user = userEvent.setup();
+      const ragInference = stubRag(() => Promise.resolve(ragStream()));
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'my-provider');
+      await ask(user);
+
+      await waitFor(() => expect(ragInference).toHaveBeenCalled());
+      const req = ragInference.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(req.providerAlias).toBe('my-provider');
+      expect(req).not.toHaveProperty('model');
+    });
+
+    it('still renders the grounded answer and citations on a provider-routed call', async () => {
+      const user = userEvent.setup();
+      stubRag(() => Promise.resolve(ragStream()));
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'my-provider');
+      await ask(user);
+
+      await waitFor(() => expect(screen.getByText('Grounded answer.')).toBeInTheDocument());
+      expect(screen.getByText(/Relevant passage\./)).toBeInTheDocument();
+    });
+
+    it('explains a 403 (unknown or inactive alias, missing waiver) instead of the raw error', async () => {
+      const user = userEvent.setup();
+      stubRag(() =>
+        Promise.reject(statusError(403, { message: 'Unknown or inactive provider alias: nope' })),
+      );
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'nope');
+      await ask(user);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(/this call was refused/i);
+      expect(alert).toHaveTextContent(/risk waiver/i);
+      expect(alert.textContent).not.toMatch(/Status code|Body:/);
+    });
+
+    it('explains a 400 (no model, no provider default) instead of the raw error', async () => {
+      const user = userEvent.setup();
+      stubRag(() => Promise.reject(statusError(400, { message: 'No model was named.' })));
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'my-provider');
+      await ask(user);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(/enter one above/i);
+      expect(alert.textContent).not.toMatch(/Status code|Body:/);
+    });
+
+    it('shows the API message for another status (402) on a provider-routed call, not a raw dump', async () => {
+      const user = userEvent.setup();
+      stubRag(() => Promise.reject(statusError(402, { message: 'Inference balance is empty.' })));
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'my-provider');
+      await ask(user);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('Inference balance is empty.');
+      expect(alert.textContent).not.toMatch(/Status code|Body:/);
+    });
+
+    it('trims the alias and the provider model before sending', async () => {
+      const user = userEvent.setup();
+      const ragInference = stubRag(() => Promise.resolve(ragStream()));
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), '  my-provider ');
+      await user.type(
+        screen.getByRole('textbox', { name: /provider model/i }),
+        ' provider-model-1  ',
+      );
+      await ask(user);
+
+      await waitFor(() => expect(ragInference).toHaveBeenCalled());
+      const req = ragInference.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(req.providerAlias).toBe('my-provider');
+      expect(req.model).toBe('provider-model-1');
+    });
+
+    it('keeps the notice on screen while the call is still streaming', async () => {
+      const user = userEvent.setup();
+      stubRag(() => Promise.resolve(NEVER_ENDING_STREAM()));
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'my-provider');
+      await ask(user);
+
+      expect(await screen.findByRole('button', { name: 'Stop' })).toBeInTheDocument();
+      expect(screen.getByText(/leaves the Vectros perimeter/i)).toBeInTheDocument();
+    });
+
+    it('keeps the notice on screen after a refused call, next to the error', async () => {
+      const user = userEvent.setup();
+      stubRag(() => Promise.reject(statusError(403, { message: 'x' })));
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'my-provider');
+      await ask(user);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/this call was refused/i);
+      expect(screen.getByText(/leaves the Vectros perimeter/i)).toBeInTheDocument();
+    });
+
+    it('maps other statuses on a provider-routed call to a neutral line', async () => {
+      const user = userEvent.setup();
+      stubRag(() => Promise.reject(statusError(401, undefined)));
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'my-provider');
+      await ask(user);
+
+      const alert = await screen.findByRole('alert');
+      // The detail line itself is neutral: no blame, no "try again" for a 401.
+      expect(screen.getByText('The request failed (status 401).')).toBeInTheDocument();
+      expect(alert.textContent).not.toMatch(/Status code|Body:/);
+    });
+
+    it('writes nothing to local or session storage', async () => {
+      const user = userEvent.setup();
+      const setItem = vi.spyOn(Storage.prototype, 'setItem');
+      stubRag(() => Promise.resolve(ragStream()));
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'my-provider');
+      await ask(user);
+      await waitFor(() => expect(screen.getByText('Grounded answer.')).toBeInTheDocument());
+      // Neither storage (local or session) was written with the alias.
+      expect(JSON.stringify(setItem.mock.calls)).not.toMatch(/my-provider/);
+      setItem.mockRestore();
+    });
+
+    it.each([402, 500])(
+      'leaves a platform-model %i exactly as before: the raw SDK text is still shown (no alias set)',
+      async (status) => {
+        const user = userEvent.setup();
+        stubRag(() => Promise.reject(statusError(status, { message: 'Platform said no.' })));
+        renderPage();
+        await ask(user);
+
+        const alert = await screen.findByRole('alert');
+        expect(alert).toHaveTextContent(`Status code: ${status}`);
+        expect(alert).not.toHaveTextContent(/The request failed/);
+      },
+    );
+
+    it('does not rewrite a platform-model failure (no alias set)', async () => {
+      const user = userEvent.setup();
+      stubRag(() => Promise.reject(statusError(403, { message: 'whatever' })));
+      renderPage();
+      await ask(user);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).not.toHaveTextContent(/this call was refused/i);
+    });
   });
 });
