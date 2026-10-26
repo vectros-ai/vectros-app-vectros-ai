@@ -52,7 +52,7 @@ export interface CurrentContextValue {
    */
   readonly activeTenantId: TenantId | null;
   /**
-   * Switch the active context: drops the partner-API bearer cache (so the next
+   * Switch the active context: drops the Vectros API bearer cache (so the next
    * call mints a token scoped to the new `(tenant, context)`) and refetches
    * context-scoped data. Async. No server-side persistence — context is
    * token-derived, not a stored preference. Takes the full option (not a bare

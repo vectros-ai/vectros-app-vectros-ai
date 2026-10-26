@@ -511,8 +511,7 @@ export function DocumentsPage(): React.JSX.Element {
   );
 
   // "Ask this folder" — deep-link into the AI workspace with the folder pre-set
-  // as the RAG scope (AskPage reads ?folderId=). Exact-folder scope (the subtree
-  // variant is a separate follow-up); a missing id is a no-op.
+  // as the RAG scope (AskPage reads ?folderId=). Exact-folder scope only; a missing id is a no-op.
   const askFolder = (folderId: string | undefined): void => {
     if (folderId) navigate(`/ai/ask?folderId=${encodeURIComponent(folderId)}`);
   };
@@ -520,7 +519,7 @@ export function DocumentsPage(): React.JSX.Element {
   // The delete dialog's cascade-scope summary — built from `cascadePlanQuery`,
   // which walks the target's whole subtree (documents, records, and
   // sub-folders, recursively), not from whatever this page happens to have
-  // loaded already. So unlike the old best-effort guess, this is accurate
+  // loaded already. So this is accurate
   // regardless of the current folder filter — modulo the one residual the
   // cascade itself surfaces directly: a row outside this credential's own
   // read visibility (see `cascadeStillNotEmpty` above).

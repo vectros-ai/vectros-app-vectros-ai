@@ -131,7 +131,7 @@ describe('AskPage', () => {
     await user.hover(score);
     expect(await screen.findByRole('tooltip')).toHaveTextContent(/Reciprocal Rank Fusion/);
     expect(screen.queryByRole('link', { name: /doc_42/ })).not.toBeInTheDocument();
-    expect(screen.getByText(/aren't click-through yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/are not click-through in this app/i)).toBeInTheDocument();
 
     // The query was forwarded as the RAG request.
     const req = ragInference.mock.calls[0]?.[0] as { query: string };
@@ -596,7 +596,7 @@ describe('AskPage', () => {
     });
 
     it.each([402, 500])(
-      'leaves a platform-model %i exactly as before: the raw SDK text is still shown (no alias set)',
+      'shows the platform message for a platform-model %i, not the SDK error text (no alias set)',
       async (status) => {
         const user = userEvent.setup();
         stubRag(() => Promise.reject(statusError(status, { message: 'Platform said no.' })));
@@ -604,19 +604,81 @@ describe('AskPage', () => {
         await ask(user);
 
         const alert = await screen.findByRole('alert');
-        expect(alert).toHaveTextContent(`Status code: ${status}`);
-        expect(alert).not.toHaveTextContent(/The request failed/);
+        expect(alert).toHaveTextContent('Platform said no.');
+        expect(alert).not.toHaveTextContent(/Status code|Body:|Error/);
       },
     );
 
-    it('does not rewrite a platform-model failure (no alias set)', async () => {
+    it.each([
+      [429, 'BALANCE_BUSY', 'Your pre-paid inference balance is busy. This is not a shortage: retry in a moment.'],
+      [503, 'BALANCE_UNAVAILABLE', 'A temporary fault interrupted the balance step. This is not a shortage: retry in a moment.'],
+    ])('shows the platform message for a %i %s refusal on the platform path, never the SDK text', async (status, errorCode, message) => {
+      const user = userEvent.setup();
+      stubRag(() => Promise.reject(statusError(status, { message, errorCode })));
+      renderPage();
+      await ask(user);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(message);
+      expect(alert).not.toHaveTextContent(/Status code|Body:|BALANCE_/);
+    });
+
+    it('a platform-path refusal that carries no message shows a neutral line with the status', async () => {
+      const user = userEvent.setup();
+      stubRag(() => Promise.reject(statusError(503, undefined)));
+      renderPage();
+      await ask(user);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('The request failed (status 503). Please try again.');
+      expect(alert).not.toHaveTextContent(/Status code|Body:/);
+    });
+
+    it('shows the platform message for a platform-model 403, not the provider-routed 403 text (no alias set)', async () => {
       const user = userEvent.setup();
       stubRag(() => Promise.reject(statusError(403, { message: 'whatever' })));
       renderPage();
       await ask(user);
 
       const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('whatever');
       expect(alert).not.toHaveTextContent(/this call was refused/i);
+      expect(alert).not.toHaveTextContent(/Status code|Body:/);
+    });
+
+    it.each([
+      ['WAIVER_NOT_SIGNED', /waiver has not been signed/i],
+      ['WAIVER_TEXT_CHANGED', /text changed afterwards/i],
+      ['WAIVER_REVOKED', /was revoked/i],
+    ])('a provider-routed 403 carrying %s shows that waiver case, not the general list', async (errorCode, expected) => {
+      const user = userEvent.setup();
+      stubRag(() =>
+        Promise.reject(
+          statusError(403, {
+            message: 'Provider alias my-provider requires the provider waiver (waiverType=byo-model-inference:customer-key).',
+            errorCode,
+          }),
+        ),
+      );
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'my-provider');
+      await ask(user);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(expected);
+      expect(alert).toHaveTextContent(/account owner/i);
+      expect(alert).not.toHaveTextContent(/spelled exactly|waiverType|byo-model-inference/i);
+      expect(alert).not.toHaveTextContent(/Status code|Body:/);
+    });
+
+    it('a provider-routed 403 with an errorCode the app does not know keeps the general text', async () => {
+      const user = userEvent.setup();
+      stubRag(() => Promise.reject(statusError(403, { message: 'x', errorCode: 'SOMETHING_NEW' })));
+      renderPage();
+      await user.type(screen.getByRole('textbox', { name: /provider alias/i }), 'my-provider');
+      await ask(user);
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(/this call was refused.*spelled exactly/i);
     });
   });
 });

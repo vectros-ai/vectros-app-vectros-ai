@@ -2,7 +2,7 @@
 // RecordsPage — the records read explorer (path: `/records`).
 //
 // The first data-plane read surface (read paths). Records are listed
-// per record TYPE (the partner API requires it), so the page is: pick a schema
+// per record TYPE (the Vectros API requires it), so the page is: pick a schema
 // (type) → list its records → click through to a record's detail.
 //
 // Schema-driven columns: when the selected schema describes fields, their

@@ -153,8 +153,8 @@ describe('validateScopeFilter', () => {
   });
 
   it('applies the full value grammar, not just a whitespace check', () => {
-    // The check used to be "non-empty and no whitespace", which was strictly looser than the API's
-    // rule — so these all reached the server and came back as errors. A colon is the sharpest case:
+    // A "non-empty and no whitespace" check would be strictly looser than the API's
+    // rule — so these would all reach the server and come back as errors. A colon is the sharpest case:
     // a scope value becomes part of a storage key, so the API refuses one outright.
     expect(validateScopeFilter('org:a:b')?.code).toBe('grammar');
     expect(validateScopeFilter('org:has.dot')?.code).toBe('grammar');
@@ -164,10 +164,10 @@ describe('validateScopeFilter', () => {
   });
 
   it('flags a space after the colon — the value is tested exactly as it is SENT', () => {
-    // Regression: an earlier version trimmed the value before testing it while `scopeFilterParam`
-    // sent the untrimmed string, so this common typing habit validated clean and then 400'd at the
-    // server — looser than the plain whitespace check it replaced, in the one function whose stated
-    // job is to stop a doomed request from firing.
+    // Regression: the value is tested exactly as `scopeFilterParam` SENDS it. Trimming it before
+    // testing while sending the untrimmed string would let this common typing habit validate clean
+    // and then 400 at the server — looser than a plain whitespace check, in the one function whose
+    // stated job is to stop a doomed request from firing.
     expect(validateScopeFilter('org: 6ba7b810-9dad-11d1-80b4-00c04fd430c8')?.code).toBe('grammar');
     // Whitespace AROUND the whole string is a different case and stays accepted: `scopeFilterParam`
     // trims the string before both validating and sending, so the two agree. It is the space INSIDE

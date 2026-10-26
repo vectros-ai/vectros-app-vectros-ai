@@ -45,7 +45,7 @@ export const COGNITO_CONFIG: CognitoConfig = {
  * API endpoint configuration for the two-stage auth bridge:
  *   - `developerApiBase` — the Cognito-gated developer API. app.vectros.ai
  *     calls `GET ${developerApiBase}/developer/scoped-token?context=<id>`
- *     to mint a partner-API `st_*` bearer whose `context_id` claim is the
+ *     to mint a Vectros API `st_*` bearer whose `context_id` claim is the
  *     selected AppContext (the context switcher's token swap).
  *   - `vectrosApiBase` — the Vectros API the minted `st_*` unlocks. All
  *     `/v1/*` data-plane traffic (records, schemas, folders, documents,

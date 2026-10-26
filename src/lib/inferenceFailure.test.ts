@@ -45,9 +45,14 @@ describe('explainProviderFailure', () => {
     expect(out).toMatch(/attested that provider configuration in the developer portal/);
   });
 
-  it('gives the same 403 text for any body and whether or not a provider model was typed', () => {
+  it('gives the same 403 text for a body with no waiver errorCode, whether or not a provider model was typed', () => {
     for (const body of [
       { message: 'Token scope does not permit inference operations.' },
+      { message: 'x', errorCode: 'SOMETHING_ELSE' },
+      { message: 'x', errorCode: 7 },
+      { message: 'x', errorCode: '' },
+      { message: 'x', errorCode: 'constructor' },
+      { message: 'x', errorCode: '__proto__' },
       undefined,
       'plain text',
     ]) {
@@ -57,6 +62,59 @@ describe('explainProviderFailure', () => {
         );
       }
     }
+  });
+
+  describe('403 with a waiver errorCode', () => {
+    // The three codes the platform sends when the provider waiver is not in force. Each gets the app's own
+    // sentence for what an account owner does; none shows the API's wording (which names the waiver type).
+    const cases: ReadonlyArray<[string, string, RegExp]> = [
+      ['WAIVER_NOT_SIGNED', 'ai.route.error.waiverNotSigned', /has not been signed/],
+      ['WAIVER_TEXT_CHANGED', 'ai.route.error.waiverTextChanged', /text changed afterwards.*review and sign the current text/],
+      ['WAIVER_REVOKED', 'ai.route.error.waiverRevoked', /was revoked.*can sign it again/],
+    ];
+
+    it.each(cases)('%s: the message for that case, not the general 403 text', (code, id, pattern) => {
+      for (const typed of [true, false]) {
+        const out = messageOf(
+          explainProviderFailure(
+            statusError(403, {
+              message: 'Provider alias x requires the provider waiver (waiverType=byo-model-inference:customer-key), which this tenant has not signed.',
+              errorCode: code,
+              requestId: 'req-1',
+            }),
+            intl,
+            typed,
+          ),
+        );
+        expect(out).toBe(messages[id as keyof typeof messages]);
+        expect(out).toMatch(pattern);
+        expect(out).not.toBe(messages['ai.route.error.forbidden']);
+        expect(out).not.toMatch(/Status code|Body:|waiverType|byo-model-inference|Forbidden/);
+      }
+    });
+
+    it('names the account owner and the developer portal where an owner can act', () => {
+      for (const id of [
+        'ai.route.error.waiverNotSigned',
+        'ai.route.error.waiverTextChanged',
+        'ai.route.error.waiverRevoked',
+      ] as const) {
+        expect(messages[id]).toMatch(/account owner .*developer portal \(Model Providers\)/);
+      }
+    });
+
+    it('an errorCode on any other status does not select a waiver message', () => {
+      for (const status of [400, 402, 429, 503]) {
+        const out = messageOf(
+          explainProviderFailure(
+            statusError(status, { message: 'Because.', errorCode: 'WAIVER_NOT_SIGNED' }),
+            intl,
+            true,
+          ),
+        );
+        expect(out).toBe('Because.');
+      }
+    });
   });
 
   describe('400', () => {
@@ -123,7 +181,7 @@ describe('explainProviderFailure', () => {
       },
     );
 
-    it.each([429, 500, 502, 503])(
+    it.each([408, 429, 500, 502, 503])(
       'status %i with no message: a neutral line that says to try again',
       (status) => {
         expect(messageOf(explainProviderFailure(statusError(status, undefined), intl, false))).toBe(

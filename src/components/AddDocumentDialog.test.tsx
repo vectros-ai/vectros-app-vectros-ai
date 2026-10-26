@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // AddDocumentDialog tests — the multi-step upload path (presign → S3 PUT) is the
-// riskiest data flow in the app, and its failure branches were previously only
-// happy-path-exercised. Covers: upload success, the missing-presigned-URL and
+// riskiest data flow in the app, so its failure branches get explicit coverage.
+// Covers: upload success, the missing-presigned-URL and
 // failed-S3-PUT error branches, ingest success, and folder wiring — plus the
 // compensation those two failure branches owe: the document created before the
 // bytes existed is deleted again, while one merely matched by externalId (which

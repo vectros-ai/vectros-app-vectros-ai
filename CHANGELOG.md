@@ -3,6 +3,56 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.22.0 — 2026-10-25
+
+### Added
+
+- **The model list shows the long-prompt rate.** A model priced by prompt length lists, beside its standard credit rate, the
+  rate charged for a prompt longer than its threshold (for example, for Claude Haiku 5.5, "prompts over 100,000 tokens:
+  0.055/0.275 cr per 1k tokens"). The threshold and both rates come from the model catalog, and both are the US rates. Models without a second rate are
+  unchanged.
+
+### Fixed
+
+- **The model list shows the rate a default request is billed.** Requests are served from a US region by default and billed
+  the catalog's US rate, which is the base rate multiplied by the model's region premium (about 10% more for most models, no
+  difference for the rest). The list showed the base rate and so understated the cost of a default request; it now shows the
+  US rate.
+
+### Security
+
+- **Build tooling updated to patched releases.** `vite` is now 8.1.6 and `source-map-js` resolves to 1.2.2. Both are used
+  only while building the app, so the built app is unchanged. If you forked the app, raise your `vite` pin to 8.1.6 or later.
+
+### Changed
+
+- **A provider-routed call refused because the account's provider waiver is not in force now says which case it is.** The
+  platform answers with a `403` and an `errorCode`: `WAIVER_NOT_SIGNED`, `WAIVER_TEXT_CHANGED` or `WAIVER_REVOKED`.
+  Ask, Chat and "Ask this document" show a message for that case that says what an account owner does in the developer
+  portal (Model Providers). Any other `403`, and a `403` with a code the app does not know, keeps the list of
+  possible causes. The codes need platform 0.48.0 or later.
+- **A call refused before the answer starts shows the platform's message instead of the SDK's error text.** When Ask, Chat or
+  "Ask this document" is refused (a busy or interrupted pre-paid balance, a rate limit, a missing permission), the alert shows
+  the platform's message, which for the retryable refusals says so in plain words (a busy balance is not a shortage, and the
+  call can be tried again in a moment). When the response carries no message, the alert shows a line with the status that says
+  to try again for a timeout, a rate limit or a server error. A failure with no status, such as an error event in the stream or
+  a network error, is shown as before. This needs `@vectros-ai/react` 0.16.0 or later.
+- **The Account page names what the Admin app manages.** It lists account details and two-factor authentication.
+- **The note under Ask citations says the sources are not click-through in this app.**
+- **The README names the model list's credit rates.** It says the picker lists each model's credit rate and, where a model
+  has one, the long-prompt rate.
+- **The schema pages name the CLI or SDK for authoring schemas.** The empty state and the subtitle both say so; the Admin
+  app has no schema pages.
+- **The `.env.example` comments use customer wording.** The variable notes name the settings a fork changes.
+- **Source comments describe the code as it is.** Behaviour is unchanged.
+- **Built against SDK 0.48.0.** Ask, Chat and "Ask this document" do not set the new optional `reasoning` request field, so
+  their streams are unchanged. The record and document editors already offer reload or overwrite on a `409`; an overwrite that
+  meets another write to the same item at the same moment now also gets that `409` instead of replacing the other change.
+  A provider-routed call whose stored provider key cannot be opened is refused with a `503` before the answer starts, and
+  the alert shows the platform's message. A person whose external subject was stored only through `PUT /v1/users/{id}` is
+  not given your account in their sign-in or tenant switcher; invite them instead. See
+  the [SDK changelog](https://github.com/vectros-ai/vectros-api-spec/blob/main/CHANGELOG.md) for the full release.
+
 ## 0.21.0 — 2026-10-12
 
 ### Added

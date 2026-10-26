@@ -2,7 +2,7 @@
 // Auth entry point for app.vectros.ai.
 //
 // The auth stack (provider-agnostic adapter, Cognito reference implementation,
-// partner-API token cache keyed by (tenant, context), scope gating, tenant
+// Vectros API token cache keyed by (tenant, context), scope gating, tenant
 // switching) lives in the shared @vectros-ai/react package so the reference
 // apps share one implementation. This module re-exports it as the app's single
 // auth import surface — call sites do `import { useAuth } from '../auth'`.

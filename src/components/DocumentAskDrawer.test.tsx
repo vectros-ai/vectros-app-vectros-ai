@@ -292,7 +292,7 @@ describe('DocumentAskDrawer', () => {
     });
 
     it.each([402, 500])(
-      'leaves a platform-model %i exactly as before: the raw SDK text is still shown (no alias set)',
+      'shows the platform message for a platform-model %i, not the SDK error text (no alias set)',
       async (status) => {
         const user = userEvent.setup();
         stubAsk(() => Promise.reject(statusError(status, { message: 'Platform said no.' })));
@@ -300,19 +300,46 @@ describe('DocumentAskDrawer', () => {
         await ask(user);
 
         const alert = await screen.findByRole('alert');
-        expect(alert).toHaveTextContent(`Status code: ${status}`);
-        expect(alert).not.toHaveTextContent(/The request failed/);
+        expect(alert).toHaveTextContent('Platform said no.');
+        expect(alert).not.toHaveTextContent(/Status code|Body:|Error/);
       },
     );
 
-    it('does not rewrite a platform-model failure (no alias set)', async () => {
+    it.each([
+      [429, 'BALANCE_BUSY', 'Your pre-paid inference balance is busy. This is not a shortage: retry in a moment.'],
+      [503, 'BALANCE_UNAVAILABLE', 'A temporary fault interrupted the balance step. This is not a shortage: retry in a moment.'],
+    ])('shows the platform message for a %i %s refusal on the platform path, never the SDK text', async (status, errorCode, message) => {
+      const user = userEvent.setup();
+      stubAsk(() => Promise.reject(statusError(status, { message, errorCode })));
+      renderDrawer();
+      await ask(user);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent(message);
+      expect(alert).not.toHaveTextContent(/Status code|Body:|BALANCE_/);
+    });
+
+    it('a platform-path refusal that carries no message shows a neutral line with the status', async () => {
+      const user = userEvent.setup();
+      stubAsk(() => Promise.reject(statusError(503, undefined)));
+      renderDrawer();
+      await ask(user);
+
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('The request failed (status 503). Please try again.');
+      expect(alert).not.toHaveTextContent(/Status code|Body:/);
+    });
+
+    it('shows the platform message for a platform-model 403, not the provider-routed 403 text (no alias set)', async () => {
       const user = userEvent.setup();
       stubAsk(() => Promise.reject(statusError(403, { message: 'whatever' })));
       renderDrawer();
       await ask(user);
 
       const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('whatever');
       expect(alert).not.toHaveTextContent(/this call was refused/i);
+      expect(alert).not.toHaveTextContent(/Status code|Body:/);
     });
 
     it('explains a 403 instead of the raw error', async () => {

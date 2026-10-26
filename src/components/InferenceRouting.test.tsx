@@ -28,6 +28,12 @@ const MODELS = {
       availableOn: ['free', 'pro'],
       inputCreditsPer1kTokens: 1,
       outputCreditsPer1kTokens: 3,
+      regionPricing: {
+        base: { input: 1, output: 3 },
+        us: { input: 1.1, output: 3.3 },
+        regionPremiumFactor: 1.1,
+        globalAvailable: true,
+      },
     },
     {
       id: 'opus',
@@ -37,6 +43,12 @@ const MODELS = {
       availableOn: ['enterprise'],
       inputCreditsPer1kTokens: 15,
       outputCreditsPer1kTokens: 75,
+      regionPricing: {
+        base: { input: 15, output: 75 },
+        us: { input: 16.5, output: 82.5 },
+        regionPremiumFactor: 1.1,
+        globalAvailable: true,
+      },
     },
   ],
 };

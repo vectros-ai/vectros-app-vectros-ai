@@ -7,9 +7,8 @@
 // spacing, and the responsive action layout identical instead of each page
 // re-deriving the same Box/Typography stack.
 //
-// Adopted so far by Account + Schemas; the remaining top-level pages (Home,
-// Records, Documents, Search, the AI workspace) still hand-roll the same block
-// and are migrated to this primitive as a follow-up.
+// Used by Account + Schemas; the remaining top-level pages (Home, Records,
+// Documents, Search, the AI workspace) hand-roll the same block.
 //
 // Detail pages (record / document / schema detail) lead with a back-link rather
 // than a page title — that's a separate layout concern, not this component.

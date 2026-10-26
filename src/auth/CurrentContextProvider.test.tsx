@@ -14,7 +14,7 @@ import { QueryClient } from '@tanstack/react-query';
 
 import type * as VectrosReact from '@vectros-ai/react';
 
-// Spy the partner-API token-cache clear (the data-plane context-isolation
+// Spy the Vectros API token-cache clear (the data-plane context-isolation
 // mechanism). Partial-mock the package so every other export stays real.
 vi.mock('@vectros-ai/react', async (importOriginal) => {
   const actual = await importOriginal<typeof VectrosReact>();
@@ -326,7 +326,7 @@ describe('CurrentContextProvider enumeration', () => {
 // ---------------------------------------------------------------------------
 // setContext — the data-plane context-switch isolation mechanism.
 //
-// Switching the active context MUST drop the partner-API token cache so the
+// Switching the active context MUST drop the Vectros API token cache so the
 // next call re-mints an st_* bearer scoped to the NEW context, then invalidate
 // all context-scoped queries so cached PHI from the prior context can't be
 // served under the new one. The ContextSwitcher 'switches on selection' test
@@ -369,7 +369,7 @@ describe('CurrentContextProvider.setContext (context-switch isolation)', () => {
     vi.restoreAllMocks();
   });
 
-  it('clears the partner-API token cache AND resets queries (clear BEFORE reset), then updates context', async () => {
+  it('clears the Vectros API token cache AND resets queries (clear BEFORE reset), then updates context', async () => {
     const user = userEvent.setup();
     const resetSpy = vi.spyOn(QueryClient.prototype, 'resetQueries');
 

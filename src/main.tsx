@@ -9,7 +9,7 @@
 //      catching async/Promise errors that React does not see.
 //   4. Set the document title from BRAND so re-skins don't require touching
 //      index.html.
-//   5. Wire the partner-API token minter to the auth adapter.
+//   5. Wire the Vectros API token minter to the auth adapter.
 //   6. Mount the React tree under StrictMode + ErrorBoundary +
 //      QueryClientProvider + IntlProvider + ThemeProvider + Router.
 // ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ const authProvider = new CognitoAuthProvider({
   productName: BRAND.productName,
 });
 
-// 5a. Wire the partner-API token cache's minter to the just-instantiated
+// 5a. Wire the Vectros API token cache's minter to the just-instantiated
 //     adapter. The cache (consumed by the SDK's token supplier — non-React code
 //     that can't read `useAuth()`) stays provider-agnostic: it knows nothing
 //     about how a bearer is minted. CognitoAuthProvider.mintPartnerApiToken does

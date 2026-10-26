@@ -1,7 +1,9 @@
 // ---------------------------------------------------------------------------
 // ModelPicker — the inference model selector shared by the AI workspace
 // surfaces. Lists the full registry (soft-annotate: every model shown,
-// labelled with its plan tiers + per-1k-token credit rate); the caller seeds the
+// labelled with its plan tiers + per-1k-token credit rate, plus the
+// long-prompt rate for a model priced by prompt length; both are the US-served
+// rate, which is what a default request is billed); the caller seeds the
 // value from the registry's `defaultModel`. No hard plan-gating — selecting an
 // out-of-tier model surfaces the backend's availability error on the stream.
 // Controlled: parent owns the selected id.
@@ -64,19 +66,34 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps): Re
             : (models.find((m) => m.id === v)?.name ?? v)
         }
       >
-        {models.map((m) => (
-          <MenuItem key={m.id} value={m.id}>
-            {m.name}
-            {' — '}
-            <Typography component="span" variant="caption" color="text.secondary">
-              {m.availableOn.join('/')} ·{' '}
-              {intl.formatMessage(
-                { id: 'ai.modelCredits' },
-                { inRate: m.inputCreditsPer1kTokens, outRate: m.outputCreditsPer1kTokens },
-              )}
-            </Typography>
-          </MenuItem>
-        ))}
+        {models.map((m) => {
+          const longContext = m.longContext;
+          return (
+            // Two rate pairs make an option long; let it wrap rather than clip on a narrow screen.
+            <MenuItem key={m.id} value={m.id} sx={{ whiteSpace: 'normal' }}>
+              {m.name}
+              {' — '}
+              <Typography component="span" variant="caption" color="text.secondary">
+                {m.availableOn.join('/')} ·{' '}
+                {longContext != null
+                  ? intl.formatMessage(
+                      { id: 'ai.modelCreditsLongContext' },
+                      {
+                        inRate: m.regionPricing.us.input,
+                        outRate: m.regionPricing.us.output,
+                        tokens: longContext.promptTokensOver,
+                        longInRate: longContext.us.input,
+                        longOutRate: longContext.us.output,
+                      },
+                    )
+                  : intl.formatMessage(
+                      { id: 'ai.modelCredits' },
+                      { inRate: m.regionPricing.us.input, outRate: m.regionPricing.us.output },
+                    )}
+              </Typography>
+            </MenuItem>
+          );
+        })}
       </Select>
     </FormControl>
   );

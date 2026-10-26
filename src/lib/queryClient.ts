@@ -16,7 +16,7 @@
 //   - `staleTime: 30_000` — 30s. Data list reads tolerate up to 30s of
 //     staleness; this kills the cross-component duplicate-fetch pattern.
 //
-//   - `gcTime: 5 * 60_000` — 5min. Matches the Rust authorizer's policy-cache
+//   - `gcTime: 5 * 60_000` — 5min. Matches the authorizer's policy-cache
 //     window so reads of authorizer-bound data have predictable freshness.
 //
 //   - `refetchOnWindowFocus: false` — OFF. Default TanStack Query behavior
