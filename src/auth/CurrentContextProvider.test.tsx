@@ -116,7 +116,7 @@ describe('CurrentContextProvider enumeration', () => {
 
   it('OWNER: lists all contexts except the reserved (and non-active) ones', async () => {
     // OWNER enumeration reads the adapter's developer-API lister (NOT the
-    // partner client) — returns AppContextSummary rows, not a page envelope.
+    // data client) — returns AppContextSummary rows, not a page envelope.
     const listAppContexts = vi.fn().mockResolvedValue([
       { contextId: 'default', name: 'Default', status: 'active' },
       { contextId: 'vectros-admin', name: 'Admin', status: 'active' }, // reserved → excluded

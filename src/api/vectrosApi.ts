@@ -122,11 +122,15 @@ export type FolderResponse = Awaited<ReturnType<_Folders['getFolder']>>;
 export type DocumentResponse = Awaited<ReturnType<_Documents['getDocument']>>;
 /** A document's full extracted/ingested text. */
 export type DocumentTextResponse = Awaited<ReturnType<_Documents['getDocumentText']>>;
-/** A single audit-trail version row (changeType, changedBy, createdAt, changedFields, …).
+/** A single audit-trail version row (changeType, changedBy, actingVia, createdAt, changedFields, …).
  *  Shared by records + documents — both `getXVersions` return the same page. */
 export type VersionEntry = NonNullable<
   Awaited<ReturnType<_Records['getRecordVersions']>>['data']
 >[number];
+/** The automated execution (for example an agent run) a version-history entry was made through, on behalf
+ *  of the entry's `changedBy`. Absent for a change made directly with a credential. `kind` is an open set:
+ *  render an unrecognized kind rather than hiding it. */
+export type ActingVia = NonNullable<VersionEntry['actingVia']>;
 /** A unified search response (results + totals + timing). */
 export type SearchResponse = Awaited<ReturnType<_Search['content']>>;
 /** A single search hit (sourceType-discriminated document/record chunk). */

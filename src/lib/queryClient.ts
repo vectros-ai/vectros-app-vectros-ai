@@ -6,7 +6,7 @@
 // cache from leaking across `it()` blocks.
 //
 // The defaults below are the OPINIONATED reference-app baseline (shared with
-// the Vectros Admin App). Partner forks can override per-query via the second argument
+// the Vectros Admin App). Forks can override per-query via the second argument
 // to `useQuery` / `useMutation`, or replace the client entirely.
 //
 //   - `retry: 1` — single transparent retry then bubble. Data surfaces
@@ -20,7 +20,7 @@
 //     window so reads of authorizer-bound data have predictable freshness.
 //
 //   - `refetchOnWindowFocus: false` — OFF. Default TanStack Query behavior
-//     refetches on tab focus, which surprises partners migrating from
+//     refetches on tab focus, which surprises developers migrating from
 //     `useEffect` patterns (sudden network activity, jumping spinners).
 //
 //   - `mutations.retry: 0` — mutations NEVER auto-retry. Callers must decide

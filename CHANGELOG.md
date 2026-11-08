@@ -3,6 +3,25 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.22.1 — 2026-11-07
+
+### Added
+
+- **History shows the agent behind a change.** When an agent run made a change on someone's behalf, the record and document history shows
+  which agent and run made it ("via agent … · run …", the tool on hover) beside the person whose access it used. A change made
+  directly shows no agent. Needs an API that returns `actingVia` (0.49.0 and later); with an earlier API the history looks as before.
+
+### Changed
+
+- **The app is built on SDK 0.49.0.**
+
+### Fixed
+
+- **A file whose text is still being extracted no longer shows an error.** The document page says so, checks again every few seconds and
+  shows the text when it is ready; Ask stays disabled until then, on the page and in the Documents list.
+- **A file with no extractable text no longer shows an error.** For an image, a scanned page or a protected file, the document page says
+  no text could be extracted and that the original can still be downloaded, and Ask is disabled on the page and in the Documents list.
+
 ## 0.22.0 — 2026-10-25
 
 ### Added

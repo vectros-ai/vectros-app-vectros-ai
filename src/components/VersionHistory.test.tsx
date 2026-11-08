@@ -105,4 +105,45 @@ describe('VersionHistory', () => {
     );
     expect(screen.queryByText(/earlier history exists/i)).not.toBeInTheDocument();
   });
+
+  it('names the agent and the run for a change an agent run made, and nothing for a person', () => {
+    render(
+      <TestProviders>
+        <VersionHistory
+          versions={[
+            v({
+              id: 'a',
+              changeType: 'CREATE',
+              createdAt: '2026-06-01T00:00:00Z',
+              changedBy: 'user:usr_manager',
+              actingVia: { kind: 'agent-run', actorId: 'agt_1', runId: 'run_9', tool: 'records_create' },
+            }),
+            v({ id: 'b', changeType: 'UPDATE', createdAt: '2026-06-09T00:00:00Z', changedBy: 'user:usr_manager' }),
+          ]}
+        />
+      </TestProviders>,
+    );
+    const via = screen.getAllByTestId('history-acting-via');
+    expect(via).toHaveLength(1);
+    expect(via[0]?.textContent).toBe('via agent agt_1 · run run_9');
+    expect(via[0]?.getAttribute('title')).toBe('records_create');
+  });
+
+  it('still shows an execution kind it does not know, by its own name', () => {
+    render(
+      <TestProviders>
+        <VersionHistory
+          versions={[
+            v({
+              id: 'a',
+              changeType: 'UPDATE',
+              createdAt: '2026-06-01T00:00:00Z',
+              actingVia: { kind: 'workflow', actorId: 'wf_1', runId: 'inst_1/step_2' },
+            }),
+          ]}
+        />
+      </TestProviders>,
+    );
+    expect(screen.getByTestId('history-acting-via').textContent).toBe('via workflow wf_1 / inst_1/step_2');
+  });
 });

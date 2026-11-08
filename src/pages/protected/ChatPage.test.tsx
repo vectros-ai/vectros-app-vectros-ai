@@ -41,7 +41,7 @@ async function* streamOf(deltas: string[]): AsyncGenerator<unknown> {
     outputTokens: 1,
     model: 'haiku',
     platformCreditsCharged: 0,
-    inferenceBalanceCentsCharged: 0,
+    inferenceBalanceCentsChargedMilli: 0,
   };
 }
 

@@ -146,6 +146,197 @@ describe('DocumentDetailPage', () => {
     expect(getDocumentText).toHaveBeenCalled();
   });
 
+  it('says no text could be extracted, without fetching text, for a file the API read no text from', async () => {
+    const getDocumentText = vi.fn().mockRejectedValue(Object.assign(new Error('Not found'), { statusCode: 404 }));
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Scan',
+        status: 'ACTIVE',
+        indexStatus: 'SKIPPED',
+        storeText: true,
+        fileType: 'image/png',
+        fileSize: 2048,
+        extraction: { outcome: 'NO_TEXT', truncated: false },
+        version: 1,
+      }),
+      getDocumentText,
+    });
+
+    renderDetail();
+
+    expect(await screen.findByText(/no text could be extracted from this file/i)).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't load the extracted text/i)).not.toBeInTheDocument();
+    expect(getDocumentText).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /download original/i })).toBeInTheDocument();
+    // The API refuses to answer questions about a document that has no text, so the button is not offered.
+    expect(screen.getByRole('button', { name: /ask this document/i })).toBeDisabled();
+  });
+
+  it.each(['ENCRYPTED', 'UNSUPPORTED', 'TOO_LARGE', 'UNREADABLE', 'A_NEW_OUTCOME'])(
+    'treats extraction outcome %s as no text: no text request, the explanation, Ask disabled',
+    async (outcome) => {
+      const getDocumentText = vi.fn();
+      stub({
+        getDocument: vi.fn().mockResolvedValue({
+          id: 'doc_1',
+          title: 'File',
+          status: 'ACTIVE',
+          indexStatus: 'SKIPPED',
+          storeText: true,
+          fileType: 'application/octet-stream',
+          fileSize: 2048,
+          extraction: { outcome, truncated: false },
+          version: 1,
+        }),
+        getDocumentText,
+      });
+
+      renderDetail();
+
+      expect(await screen.findByText(/no text could be extracted from this file/i)).toBeInTheDocument();
+      expect(getDocumentText).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: /ask this document/i })).toBeDisabled();
+    },
+  );
+
+  it('keeps the Ask button and fetches text when the extraction outcome is not reported yet', async () => {
+    const getDocumentText = vi.fn().mockResolvedValue({ id: 'doc_1', text: 'Body' });
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Fresh',
+        status: 'ACTIVE',
+        indexStatus: 'INDEXED',
+        storeText: true,
+        fileType: 'application/pdf',
+        fileSize: 2048,
+        version: 1,
+      }),
+      getDocumentText,
+    });
+
+    renderDetail();
+
+    expect(await screen.findByText('Body')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /ask this document/i })).toBeEnabled();
+  });
+
+  it('still fetches and shows the text of a file whose extraction was truncated', async () => {
+    const getDocumentText = vi.fn().mockResolvedValue({ id: 'doc_1', text: 'First part' });
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Long file',
+        status: 'ACTIVE',
+        indexStatus: 'INDEXED',
+        storeText: true,
+        fileType: 'application/pdf',
+        fileSize: 2048,
+        extraction: { outcome: 'TRUNCATED', truncated: true },
+        version: 1,
+      }),
+      getDocumentText,
+    });
+
+    renderDetail();
+
+    expect(await screen.findByText('First part')).toBeInTheDocument();
+    expect(getDocumentText).toHaveBeenCalled();
+  });
+
+  it('waits for the text of a file that is still being extracted: no text request, a message, Ask disabled', async () => {
+    const getDocumentText = vi.fn();
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Fresh upload',
+        status: 'ACTIVE',
+        indexStatus: 'EXTRACTING',
+        storeText: true,
+        fileType: 'application/pdf',
+        fileSize: 2048,
+        version: 1,
+      }),
+      getDocumentText,
+    });
+
+    renderDetail();
+
+    expect(await screen.findByText(/text is still being extracted/i)).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't load the extracted text/i)).not.toBeInTheDocument();
+    expect(getDocumentText).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /ask this document/i })).toBeDisabled();
+  });
+
+  it('reads the document again while its text is being extracted, then fetches the text', async () => {
+    const getDocumentText = vi.fn().mockResolvedValue({ id: 'doc_1', text: 'Now ready' });
+    const base = {
+      id: 'doc_1',
+      title: 'Fresh upload',
+      status: 'ACTIVE',
+      storeText: true,
+      fileType: 'application/pdf',
+      fileSize: 2048,
+      version: 1,
+    };
+    const getDocument = vi
+      .fn()
+      .mockResolvedValueOnce({ ...base, indexStatus: 'EXTRACTING' })
+      .mockResolvedValue({ ...base, indexStatus: 'INDEXED', extraction: { outcome: 'OK', truncated: false } });
+    stub({ getDocument, getDocumentText });
+
+    renderDetail();
+
+    expect(await screen.findByText(/text is still being extracted/i)).toBeInTheDocument();
+    expect(await screen.findByText('Now ready', undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /ask this document/i })).toBeEnabled();
+  }, 15000);
+
+  it('shows the text and keeps Ask for a file whose extraction reported OK', async () => {
+    const getDocumentText = vi.fn().mockResolvedValue({ id: 'doc_1', text: 'Whole text' });
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Report',
+        status: 'ACTIVE',
+        indexStatus: 'INDEXED',
+        storeText: true,
+        fileType: 'application/pdf',
+        fileSize: 2048,
+        extraction: { outcome: 'OK', truncated: false },
+        version: 1,
+      }),
+      getDocumentText,
+    });
+
+    renderDetail();
+
+    expect(await screen.findByText('Whole text')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /ask this document/i })).toBeEnabled();
+  });
+
+  it('fetches the text of a document ingested as text, which has no extraction and is awaiting its index', async () => {
+    const getDocumentText = vi.fn().mockResolvedValue({ id: 'doc_1', text: 'Typed in' });
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Note',
+        status: 'ACTIVE',
+        indexStatus: 'PENDING_INDEX',
+        storeText: true,
+        version: 1,
+      }),
+      getDocumentText,
+    });
+
+    renderDetail();
+
+    expect(await screen.findByText('Typed in')).toBeInTheDocument();
+    expect(getDocumentText).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /ask this document/i })).toBeEnabled();
+  });
+
   it('archives via the confirm dialog, sending ONLY the status in the patch', async () => {
     const user = userEvent.setup();
     const patchDocument = vi.fn().mockResolvedValue({ id: 'doc_1', status: 'ARCHIVED' });

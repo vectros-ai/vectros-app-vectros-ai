@@ -69,7 +69,7 @@ describe('explainProviderFailure', () => {
     // sentence for what an account owner does; none shows the API's wording (which names the waiver type).
     const cases: ReadonlyArray<[string, string, RegExp]> = [
       ['WAIVER_NOT_SIGNED', 'ai.route.error.waiverNotSigned', /has not been signed/],
-      ['WAIVER_TEXT_CHANGED', 'ai.route.error.waiverTextChanged', /text changed afterwards.*review and sign the current text/],
+      ['WAIVER_TEXT_CHANGED', 'ai.route.error.waiverTextChanged', /no longer current.*review and sign the current version/],
       ['WAIVER_REVOKED', 'ai.route.error.waiverRevoked', /was revoked.*can sign it again/],
     ];
 

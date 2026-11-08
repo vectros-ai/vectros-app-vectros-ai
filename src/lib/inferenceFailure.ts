@@ -33,10 +33,10 @@ const ENDS_SENTENCE = /[.!?]$/;
  * A status code alone does not say why a call was refused, so the wording
  * names the likely cause without claiming it:
  *
- *  - 403 with a waiver `errorCode` (not signed, text changed since it was
- *    signed, revoked, text not final): the message for that case, saying what
- *    an account owner does. The API's own wording names the provider
- *    configuration's waiver type, so the app states the case in its own words.
+ *  - 403 with a waiver `errorCode` (not signed, no longer current, revoked):
+ *    the message for that case, saying what an account owner does. The API's
+ *    own wording names the provider configuration's waiver type, so the app
+ *    states the case in its own words.
  *  - any other 403: an alias that is unknown or inactive (a malformed alias is
  *    simply unknown), or a waiver or attestation problem the platform did not
  *    name with a code, but also a token or access limit unrelated to the alias.

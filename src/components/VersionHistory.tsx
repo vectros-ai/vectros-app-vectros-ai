@@ -3,7 +3,9 @@
 //
 // Renders the rows from `getRecordVersions` / `getDocumentVersions` (the
 // `{ data, nextCursor }` page's `data`), newest first: the change type, when it
-// happened, who made it, an optional reason, and the field-level diff summary.
+// happened, who made it (and, for a change an agent run made on that person's
+// behalf, which agent and run), an optional reason, and the field-level diff
+// summary.
 //
 // This is the no-code expression of Vectros's audit/compliance posture — every
 // bootstrapped blueprint with `auditHistory` (the default) gets this view for
@@ -15,7 +17,31 @@ import { Box, Chip, Stack, Typography } from '@mui/material';
 import type { ChipProps } from '@mui/material';
 import { FormattedDate, FormattedMessage, useIntl } from 'react-intl';
 
-import type { VersionEntry } from '../api/vectrosApi';
+import type { ActingVia, VersionEntry } from '../api/vectrosApi';
+
+const mono = { fontFamily: 'monospace' } as const;
+
+/** "via agent A · run R" for an agent run; any other (newer) kind is still shown, by its own name. */
+function ActingViaLabel({ via }: { via: ActingVia }): React.JSX.Element | null {
+  if (!via.kind) return null;
+  if (via.kind === 'agent-run') {
+    return (
+      <FormattedMessage
+        id="history.viaAgentRun"
+        values={{
+          agent: <Box component="span" sx={mono}>{via.actorId ?? ''}</Box>,
+          run: <Box component="span" sx={mono}>{via.runId ?? ''}</Box>,
+        }}
+      />
+    );
+  }
+  return (
+    <FormattedMessage
+      id="history.viaOther"
+      values={{ kind: via.kind, actor: <Box component="span" sx={mono}>{[via.actorId, via.runId].filter(Boolean).join(' / ')}</Box> }}
+    />
+  );
+}
 
 /** Color the change-type chip by its semantics (create=add, update=change, delete=remove). */
 function changeTypeColor(changeType: string | undefined): ChipProps['color'] {
@@ -103,6 +129,16 @@ export function VersionHistory({
                         ),
                       }}
                     />
+                  </Typography>
+                )}
+                {v.actingVia?.kind && (
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                    data-testid="history-acting-via"
+                    title={v.actingVia.tool}
+                  >
+                    <ActingViaLabel via={v.actingVia} />
                   </Typography>
                 )}
                 {typeof v.previousVersion === 'number' && (

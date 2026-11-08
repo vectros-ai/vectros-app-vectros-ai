@@ -144,9 +144,9 @@ ReactDOM.createRoot(rootElement).render(
                 {/*
                   CurrentTenantProvider resolves the active tenant (from the
                   `active_tenant` JWT claim + memberships) — the tenantId half of
-                  the (tenant, context) mint. The context half (CurrentContext
-                  Provider + ContextSwitcher) layers on top of this in a
-                  follow-up commit.
+                  the (tenant, context) mint. The context half
+                  (CurrentContextProvider + ContextSwitcher) layers on top of
+                  this.
                 */}
                 <CurrentTenantProvider tenancyProvider={authProvider}>
                   {/*

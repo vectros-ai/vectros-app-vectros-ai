@@ -50,7 +50,7 @@ async function* ragStream(): AsyncGenerator<unknown> {
     outputTokens: 1,
     model: 'haiku',
     platformCreditsCharged: 0,
-    inferenceBalanceCentsCharged: 0,
+    inferenceBalanceCentsChargedMilli: 0,
   };
 }
 
@@ -199,7 +199,7 @@ describe('AskPage', () => {
             outputTokens: 1,
             model: 'haiku',
             platformCreditsCharged: 0,
-            inferenceBalanceCentsCharged: 0,
+            inferenceBalanceCentsChargedMilli: 0,
           };
         })(),
       ),
@@ -228,7 +228,7 @@ describe('AskPage', () => {
             outputTokens: 1,
             model: 'haiku',
             platformCreditsCharged: 0,
-            inferenceBalanceCentsCharged: 0,
+            inferenceBalanceCentsChargedMilli: 0,
           };
         })(),
       ),
@@ -270,7 +270,7 @@ describe('AskPage', () => {
             outputTokens: 1,
             model: 'haiku',
             platformCreditsCharged: 0,
-            inferenceBalanceCentsCharged: 0,
+            inferenceBalanceCentsChargedMilli: 0,
           };
         })(),
       ),
@@ -648,7 +648,7 @@ describe('AskPage', () => {
 
     it.each([
       ['WAIVER_NOT_SIGNED', /waiver has not been signed/i],
-      ['WAIVER_TEXT_CHANGED', /text changed afterwards/i],
+      ['WAIVER_TEXT_CHANGED', /no longer current/i],
       ['WAIVER_REVOKED', /was revoked/i],
     ])('a provider-routed 403 carrying %s shows that waiver case, not the general list', async (errorCode, expected) => {
       const user = userEvent.setup();

@@ -81,6 +81,10 @@ import { DocumentAskDrawer } from '../../components/DocumentAskDrawer';
 import { VersionHistory } from '../../components/VersionHistory';
 import { OwnershipScopeChips } from '../../components/OwnershipScopeChips';
 import { IndexFailureAlert } from '../../components/IndexFailureAlert';
+import { askUnavailableReason, hasNoExtractedText, isTextExtractionRunning } from '../../lib/documentText';
+
+// How often to re-read a document whose file text is still being extracted.
+const EXTRACTION_POLL_MS = 3000;
 
 export function DocumentDetailPage(): React.JSX.Element {
   const tenant = useActiveTenantId();
@@ -118,6 +122,8 @@ export function DocumentDetailPage(): React.JSX.Element {
     queryKey: dataQueryKeys.document(tenant, context, documentId),
     queryFn: () => vectrosApiClient(tenant, context).documents.getDocument({ id: documentId }),
     enabled: documentId !== '',
+    // Right after an upload the text is not there yet; read the document again until extraction has finished.
+    refetchInterval: (query) => (isTextExtractionRunning(query.state.data) ? EXTRACTION_POLL_MS : false),
   });
 
   // The document's schema resolves its typeName + drives the typed-metadata
@@ -159,7 +165,12 @@ export function DocumentDetailPage(): React.JSX.Element {
   });
 
   const doc = documentQuery.data;
-  const hasText = doc?.storeText === true;
+  // A file the API could extract no text from keeps `storeText: true` but has no text to fetch, and while a file's
+  // text is still being extracted the text request is a 404 as well.
+  const noTextExtracted = hasNoExtractedText(doc);
+  const textPending = isTextExtractionRunning(doc);
+  const askUnavailable = askUnavailableReason(doc);
+  const hasText = doc?.storeText === true && !noTextExtracted && !textPending;
 
   // Archive / restore — the document lifecycle `status`. Archiving soft-
   // retracts the document (pulled from search + AI recall, kept + recoverable);
@@ -442,9 +453,20 @@ export function DocumentDetailPage(): React.JSX.Element {
           </Stack>
         </Box>
         <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
-          <Button variant="outlined" size="small" onClick={() => setAskOpen(true)}>
-            <FormattedMessage id="ai.docAsk.button" />
-          </Button>
+          <Tooltip
+            title={askUnavailable ? intl.formatMessage({ id: `documents.askUnavailable.${askUnavailable}` }) : ''}
+          >
+            <span>
+              <Button
+                variant="outlined"
+                size="small"
+                disabled={askUnavailable !== null}
+                onClick={() => setAskOpen(true)}
+              >
+                <FormattedMessage id="ai.docAsk.button" />
+              </Button>
+            </span>
+          </Tooltip>
           <Button
             startIcon={<EditOutlined />}
             variant="outlined"
@@ -745,7 +767,13 @@ export function DocumentDetailPage(): React.JSX.Element {
               <Typography variant="body2" color="text.secondary">
                 <FormattedMessage
                   id={
-                    fileViewEligible ? 'documentDetail.fileViewIntro' : 'documentDetail.textNotStored'
+                    fileViewEligible
+                      ? 'documentDetail.fileViewIntro'
+                      : noTextExtracted
+                        ? 'documentDetail.textNotExtracted'
+                        : textPending
+                          ? 'documentDetail.textPending'
+                          : 'documentDetail.textNotStored'
                   }
                 />
               </Typography>

@@ -164,6 +164,41 @@ describe('DocumentsPage', () => {
     expect(within(table).getByText('Reports')).toBeInTheDocument();
   });
 
+  it('offers a question only for a document that has text', async () => {
+    stub({
+      documents: vi.fn().mockResolvedValue(
+        pageOf([
+          {
+            id: 'doc_ok',
+            title: 'Has text',
+            status: 'ACTIVE',
+            indexStatus: 'INDEXED',
+            extraction: { outcome: 'OK' },
+          },
+          { id: 'doc_old', title: 'Older file', status: 'ACTIVE', indexStatus: 'INDEXED' },
+          {
+            id: 'doc_scan',
+            title: 'A scan',
+            status: 'ACTIVE',
+            indexStatus: 'SKIPPED',
+            extraction: { outcome: 'NO_TEXT' },
+          },
+          { id: 'doc_new', title: 'Just uploaded', status: 'ACTIVE', indexStatus: 'EXTRACTING' },
+        ]),
+      ),
+    });
+
+    renderPage();
+
+    await screen.findByRole('link', { name: 'Has text' });
+    expect(screen.getByRole('button', { name: 'Ask a question about Has text' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Ask a question about Older file' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Ask a question about A scan' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Ask a question about Just uploaded' }),
+    ).toBeDisabled();
+  });
+
   it('refetches the document list when the refresh button is clicked', async () => {
     const user = userEvent.setup();
     const listDocuments = vi

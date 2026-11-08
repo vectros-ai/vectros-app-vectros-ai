@@ -18,9 +18,11 @@
 // in the browser — the right pattern for a reference app at scale. The query is
 // keyed by the selected folder, so switching folders refetches that folder's
 // page set (drained; the SDK default page size is 20). TYPE scoping is
-// client-side over that drained set: `listDocuments` has no type/schema
-// parameter, and a document carries its type only indirectly (`schemaId` →
-// the schema's `typeName`), so the filter resolves that hop locally.
+// client-side over that drained set: a document carries its type only
+// indirectly (`schemaId` → the schema's `typeName`), so the filter resolves
+// that hop locally. (Since API 0.49.0 `listDocuments` also takes a `type`
+// parameter that filters on the server one page at a time; this page does not
+// use it, because it already holds the whole drained set.)
 //
 // The selected type lives in the URL (`?type=`) so it survives navigating to a
 // document's detail and back. Renders inside RequireContext, so
@@ -92,6 +94,7 @@ import { dataQueryKeys } from '../../lib/dataQueryKeys';
 import { drainPages } from '../../lib/drainPages';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import { documentSurfaceSchemas, typeNameBySchemaId } from '../../lib/documentTypes';
+import { askUnavailableReason } from '../../lib/documentText';
 import { orderFoldersAsTree } from '../../lib/folderTree';
 import {
   documentIndexStatusColor,
@@ -914,22 +917,33 @@ export function DocumentsPage(): React.JSX.Element {
                         </TableCell>
                         <TableCell align="right">
                           {d.id && (
-                            <Tooltip title={intl.formatMessage({ id: 'documents.askDocument' })}>
-                              <IconButton
-                                size="small"
-                                onClick={() => setAskTarget(d)}
-                                aria-label={intl.formatMessage(
-                                  { id: 'documents.askDocumentAria' },
-                                  {
-                                    title:
-                                      d.title && d.title.length > 0
-                                        ? d.title
-                                        : intl.formatMessage({ id: 'documents.untitled' }),
-                                  },
-                                )}
-                              >
-                                <QuestionAnswerOutlined fontSize="small" />
-                              </IconButton>
+                            <Tooltip
+                              title={
+                                askUnavailableReason(d)
+                                  ? intl.formatMessage({
+                                      id: `documents.askUnavailable.${askUnavailableReason(d)}`,
+                                    })
+                                  : intl.formatMessage({ id: 'documents.askDocument' })
+                              }
+                            >
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  disabled={askUnavailableReason(d) !== null}
+                                  onClick={() => setAskTarget(d)}
+                                  aria-label={intl.formatMessage(
+                                    { id: 'documents.askDocumentAria' },
+                                    {
+                                      title:
+                                        d.title && d.title.length > 0
+                                          ? d.title
+                                          : intl.formatMessage({ id: 'documents.untitled' }),
+                                    },
+                                  )}
+                                >
+                                  <QuestionAnswerOutlined fontSize="small" />
+                                </IconButton>
+                              </span>
                             </Tooltip>
                           )}
                         </TableCell>

@@ -19,8 +19,7 @@
 // Scale note: this resolves one value per <ReferenceLink> via its own lookup —
 // so a `cardinality: many` field with N values fires N parallel lookups (cached
 // + 30s-deduped). Fine for a reference app's detail view; a production app at
-// scale would want a batch resolve. There's no batch-lookup endpoint on the SDK
-// today — tracked as a field-model gap rather than worked around here.
+// scale would want a batch resolve, which the API does not offer yet: its batch-lookup operation is reserved and answers 501.
 // ---------------------------------------------------------------------------
 
 import { Link as RouterLink } from 'react-router';

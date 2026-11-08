@@ -53,7 +53,7 @@ export const COGNITO_CONFIG: CognitoConfig = {
  *     by the token.
  *
  * For staging both URLs typically resolve to the same host (api.staging.
- * vectros.ai); they are split into two env vars so a partner fork or a
+ * vectros.ai); they are split into two env vars so a fork or a
  * future split-domain deployment can point them at different origins.
  */
 export interface ApiConfig {

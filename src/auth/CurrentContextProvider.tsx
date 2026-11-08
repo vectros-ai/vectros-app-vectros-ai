@@ -20,8 +20,8 @@
 //   - SUB_USER: contexts where the caller holds an ACTIVE AccessProfile in the
 //               ACTIVE tenant (`listProfilesForPrincipal`, minus reserved). The
 //               principal is `usr_<partnerUserId>` from the active membership.
-//               (Cross-tenant SUB_USER + cross-partner enumeration is a tracked
-//               follow-up — the active_partner_user_id claim is per active tenant.)
+//               Only the active tenant is enumerated: the claim that carries the
+//               user id is per active tenant.
 //
 // Switching is a TOKEN SWAP, not a query-param toggle: the `st_*` bearer carries
 // the (tenant, context). setContext drops the bearer cache so the next mint
@@ -88,7 +88,7 @@ type AppContextLister = (
 
 /**
  * OWNER enumeration for a SINGLE owned tenant. Uses the OWNER-gated developer-API
- * lister (NOT the partner data API — a context-scoped data token deliberately
+ * lister (NOT the data API — a context-scoped data token deliberately
  * cannot enumerate its sibling contexts, so it would only ever return the
  * token's own context). Drops the reserved control-plane context + any
  * non-active context.
