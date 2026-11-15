@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { askUnavailableReason, hasNoExtractedText, isTextExtractionRunning } from './documentText';
+import {
+  askUnavailableReason,
+  hasNoExtractedText,
+  isPublicMediaDocument,
+  isTextExtractionRunning,
+} from './documentText';
 
 describe('documentText', () => {
   it.each(['OK', 'TRUNCATED'])('an extraction outcome of %s leaves text', (outcome) => {
@@ -45,5 +50,20 @@ describe('documentText', () => {
     expect(hasNoExtractedText(undefined)).toBe(false);
     expect(isTextExtractionRunning(undefined)).toBe(false);
     expect(askUnavailableReason(undefined)).toBeNull();
+  });
+});
+
+describe('a public-media document (it carries `media`)', () => {
+  it('has no text, so neither the text nor a question is offered', () => {
+    const doc = { indexStatus: 'SKIPPED', media: { state: 'READY' } };
+    expect(isPublicMediaDocument(doc)).toBe(true);
+    expect(hasNoExtractedText(doc)).toBe(true);
+    expect(askUnavailableReason(doc)).toBe('noText');
+  });
+
+  it('a document without `media` is not one', () => {
+    expect(isPublicMediaDocument({ indexStatus: 'INDEXED' })).toBe(false);
+    expect(isPublicMediaDocument({ media: null })).toBe(false);
+    expect(isPublicMediaDocument(undefined)).toBe(false);
   });
 });

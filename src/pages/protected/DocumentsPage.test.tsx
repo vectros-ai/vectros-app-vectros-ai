@@ -1154,6 +1154,7 @@ describe('DocumentsPage', () => {
         expect(uploadDocument).toHaveBeenCalledWith({
           fileName: 'note.txt',
           fileType: 'text/plain',
+          size: 2,
           indexMode: 'HYBRID',
           storeText: true,
         }),

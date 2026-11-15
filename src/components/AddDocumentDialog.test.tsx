@@ -94,6 +94,7 @@ describe('AddDocumentDialog — upload mode', () => {
       expect(uploadDocument).toHaveBeenCalledWith({
         fileName: 'report.pdf',
         fileType: 'application/pdf',
+        size: 5,
         indexMode: 'HYBRID',
         storeText: true,
       }),
@@ -645,6 +646,7 @@ describe('AddDocumentDialog — confirming an untyped externalId create', () => 
       expect(uploadDocument).toHaveBeenCalledWith({
         fileName: 'report.pdf',
         fileType: 'application/pdf',
+        size: 5,
         indexMode: 'HYBRID',
         storeText: true,
         externalId: 'report-2026-q1',
@@ -1063,3 +1065,86 @@ describe('AddDocumentDialog — typed create (document-surface schemas)', () => 
     expect(screen.queryByLabelText('Type (optional)')).not.toBeInTheDocument();
   });
 });
+
+// A public-media type holds images only: the API refuses a text document of it, a document-level indexMode and storeText.
+describe('AddDocumentDialog — a public-media document type', () => {
+  beforeEach(() => mockedClient.mockReset());
+  afterEach(() => vi.unstubAllGlobals());
+
+  const PHOTO_TYPE = { id: 'sch_photo', typeName: 'photo', allowedSurfaces: ['document'], fileProfile: 'PUBLIC_MEDIA', fields: [] };
+
+  it('uploads with size and the signed headers, without indexMode or storeText, and offers no text mode', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi.fn().mockResolvedValue({
+      id: 'doc_1',
+      uploadUrl: 'https://s3.example/put',
+      created: true,
+      requiredHeaders: { 'Content-Type': 'image/png', 'If-None-Match': '*' },
+    });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    stub({ uploadDocument }, [PHOTO_TYPE]);
+
+    renderDialog({ defaultTypeName: 'photo' });
+    await screen.findByText('This type holds images: upload an image file. It is never indexed and has no text.');
+    expect(screen.getByRole('button', { name: 'Ingest text' })).toBeDisabled();
+    expect(screen.queryByRole('combobox', { name: 'Index mode' })).toBeNull();
+    expect(screen.queryByLabelText(/keep the extracted text|store text/i)).toBeNull();
+
+    const image = new File(['png!'], 'logo.png', { type: 'image/png' });
+    await user.upload(screen.getByLabelText('File'), image);
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+
+    await vi.waitFor(() => expect(uploadDocument).toHaveBeenCalled());
+    const body = uploadDocument.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(body).toMatchObject({ fileName: 'logo.png', fileType: 'image/png', size: 4, schemaId: 'sch_photo' });
+    expect(body).not.toHaveProperty('indexMode');
+    expect(body).not.toHaveProperty('storeText');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({ 'Content-Type': 'image/png', 'If-None-Match': '*' });
+  });
+
+  it('picking a public-media type while in text mode switches back to the upload; an ordinary type brings the settings back', async () => {
+    const user = userEvent.setup();
+    const NOTE_TYPE = { id: 'sch_note', typeName: 'note', allowedSurfaces: ['document'], fields: [] };
+    const all = [PHOTO_TYPE, NOTE_TYPE];
+    mockedClient.mockReturnValue({
+      documents: { uploadDocument: vi.fn() },
+      // Filtered by recordType, as the API does: the dialog resolves the chosen type through it.
+      schemas: {
+        listSchemas: vi.fn((req?: { recordType?: string }) =>
+          Promise.resolve({ data: req?.recordType ? all.filter((s) => s.typeName === req.recordType) : all }),
+        ),
+      },
+    } as never);
+    renderDialog();
+    await user.click(screen.getByRole('button', { name: 'Ingest text' }));
+    expect(screen.queryByLabelText('File')).toBeNull();
+
+    await user.click(await screen.findByRole('combobox', { name: 'Type (optional)' }));
+    await user.click(await screen.findByRole('option', { name: 'photo' }));
+    await screen.findByText('This type holds images: upload an image file. It is never indexed and has no text.');
+    expect(screen.getByLabelText('File')).toBeInTheDocument();
+    expect(screen.getByLabelText('File')).toHaveAttribute('accept', 'image/jpeg,image/png,image/webp,image/gif');
+    expect(screen.queryByRole('combobox', { name: 'Index mode' })).toBeNull();
+
+    await user.click(screen.getByRole('combobox', { name: 'Type (optional)' }));
+    await user.click(await screen.findByRole('option', { name: 'note' }));
+    await vi.waitFor(() => expect(screen.getByRole('combobox', { name: 'Index mode' })).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Ingest text' })).not.toBeDisabled();
+    expect(screen.getByLabelText('Keep the extracted text')).toBeInTheDocument();
+  });
+
+  it('an empty file is uploaded without a size (the API takes a size of at least 1)', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi.fn().mockResolvedValue({ id: 'doc_1', uploadUrl: 'https://s3.example/put', created: true });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    stub({ uploadDocument });
+    renderDialog();
+    await user.upload(screen.getByLabelText('File'), new File([], 'empty.txt', { type: 'text/plain' }));
+    await user.click(screen.getByRole('button', { name: 'Upload' }));
+    await vi.waitFor(() => expect(uploadDocument).toHaveBeenCalled());
+    expect(uploadDocument.mock.calls[0]?.[0]).not.toHaveProperty('size');
+  });
+});
+

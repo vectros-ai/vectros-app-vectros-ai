@@ -3,6 +3,20 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.22.2 — 2026-11-14
+
+### Changed
+
+- **The app is built on SDK 0.50.0.**
+- **Uploads send the file's exact size** (Add document, Replace file), so the upload is bound to that size and media type and a file
+  that does not match is refused before anything is stored. The upload sends every header the API requires for it. An empty file is
+  sent without a size.
+- **A public-media document type takes an image upload only.** For a type with `fileProfile: PUBLIC_MEDIA`, Add document's file
+  picker offers the type's image formats, with no index mode and no "Keep the extracted text" switch. Its documents have no
+  text, so Ask is unavailable, and Replace file is offered only until the image has arrived;
+  a refused replacement says what to do instead.
+- **The document page shows the detected type**: what the file's content was detected as, which decides whether text is extracted.
+
 ## 0.22.1 — 2026-11-07
 
 ### Added

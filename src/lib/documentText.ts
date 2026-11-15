@@ -23,10 +23,20 @@ const EXTRACTION_RUNNING: ReadonlySet<string> = new Set([
 interface DocumentTextState {
   indexStatus?: string | undefined;
   extraction?: { outcome?: string | undefined } | undefined;
+  media?: unknown;
 }
 
-/** True when extraction finished and left no text. */
+/**
+ * True for a document of a public-media type, which carries `media`: it holds an image and never has text (the API answers its
+ * text request with 409 and refuses a replacement file once it has arrived).
+ */
+export function isPublicMediaDocument(doc: DocumentTextState | undefined): boolean {
+  return doc?.media !== undefined && doc.media !== null;
+}
+
+/** True when the document has no text to read: extraction finished and left none, or it is a public-media document. */
 export function hasNoExtractedText(doc: DocumentTextState | undefined): boolean {
+  if (isPublicMediaDocument(doc)) return true;
   const outcome = doc?.extraction?.outcome;
   return outcome !== undefined && !TEXT_OUTCOMES.has(outcome);
 }

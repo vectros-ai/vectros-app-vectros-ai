@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { presignedUploadHeaders } from './presignedUpload';
+import { presignedPutHeaders, presignedUploadHeaders } from './presignedUpload';
 
 describe('presignedUploadHeaders', () => {
   it('returns the header the response names, with its exact value', () => {
@@ -34,3 +34,31 @@ describe('presignedUploadHeaders', () => {
     expect(presignedUploadHeaders(null)).toEqual({});
   });
 });
+
+describe('requiredHeaders (a bound upload)', () => {
+  it('prefers the requiredHeaders map over the single pair, and falls back to the pair', () => {
+    expect(
+      presignedUploadHeaders({
+        requiredHeaders: { 'Content-Type': 'image/png', 'If-None-Match': '*' },
+        requiredHeaderName: 'If-None-Match',
+        requiredHeaderValue: '*',
+      }),
+    ).toEqual({ 'Content-Type': 'image/png', 'If-None-Match': '*' });
+    expect(presignedUploadHeaders({ requiredHeaders: {}, requiredHeaderName: 'If-None-Match', requiredHeaderValue: '*' })).toEqual({
+      'If-None-Match': '*',
+    });
+    expect(presignedUploadHeaders({ requiredHeaders: { a: 1, '': 'x' } })).toEqual({});
+  });
+
+  it('sends the signed Content-Type instead of fileType, never two spellings of it', () => {
+    expect(presignedPutHeaders({ requiredHeaders: { 'content-type': 'image/png' } }, 'application/octet-stream')).toEqual({
+      'content-type': 'image/png',
+    });
+    expect(presignedPutHeaders({ requiredHeaderName: 'If-None-Match', requiredHeaderValue: '*' }, 'application/pdf')).toEqual({
+      'Content-Type': 'application/pdf',
+      'If-None-Match': '*',
+    });
+    expect(presignedPutHeaders(undefined, 'text/plain')).toEqual({ 'Content-Type': 'text/plain' });
+  });
+});
+

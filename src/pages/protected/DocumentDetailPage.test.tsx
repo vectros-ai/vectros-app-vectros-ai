@@ -146,6 +146,100 @@ describe('DocumentDetailPage', () => {
     expect(getDocumentText).toHaveBeenCalled();
   });
 
+  it('a public-media document: no text request, no Replace file, Ask disabled; the detected type is shown', async () => {
+    const getDocumentText = vi.fn().mockRejectedValue(Object.assign(new Error('Conflict'), { statusCode: 409 }));
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Logo',
+        status: 'ACTIVE',
+        indexStatus: 'SKIPPED',
+        storeText: true,
+        externalId: 'logo-1',
+        fileType: 'image/png',
+        detectedType: 'image/png',
+        fileSize: 2048,
+        media: { state: 'READY', desired: 'HELD' },
+        version: 1,
+      }),
+      getDocumentText,
+    });
+
+    renderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'Logo' })).toBeInTheDocument();
+    expect(screen.getByText('Detected type')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /replace file/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /download original/i })).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't load the extracted text/i)).not.toBeInTheDocument();
+    expect(getDocumentText).not.toHaveBeenCalled();
+  });
+
+  it('a public-media document known only by its type (no `media` yet): no text request, Ask disabled, no Replace once uploaded', async () => {
+    const getDocumentText = vi.fn();
+    const photoType = { id: 'sch_photo', typeName: 'photo', allowedSurfaces: ['document'], fileProfile: 'PUBLIC_MEDIA', fields: [] };
+    const base = {
+      id: 'doc_1',
+      title: 'Logo',
+      status: 'ACTIVE',
+      storeText: true,
+      externalId: 'logo-1',
+      schemaId: 'sch_photo',
+      fileType: 'image/png',
+      fileSize: 2048,
+      version: 1,
+    };
+    stub({
+      getDocument: vi.fn().mockResolvedValue({ ...base, indexStatus: 'SKIPPED' }),
+      getDocumentText,
+      schemas: vi.fn().mockResolvedValue(pageOf([photoType])),
+    });
+    renderDetail();
+    expect(await screen.findByRole('heading', { name: 'Logo' })).toBeInTheDocument();
+    await vi.waitFor(() => expect(screen.getByText('photo')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /replace file/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /ask/i })).toBeDisabled();
+    expect(getDocumentText).not.toHaveBeenCalled();
+  });
+
+  it('a public-media document whose upload is still pending keeps Replace file (the API allows a retried upload then)', async () => {
+    const photoType = { id: 'sch_photo', typeName: 'photo', allowedSurfaces: ['document'], fileProfile: 'PUBLIC_MEDIA', fields: [] };
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1', title: 'Logo', status: 'ACTIVE', indexStatus: 'PENDING_UPLOAD', storeText: true, externalId: 'logo-1',
+        schemaId: 'sch_photo', fileType: 'image/png', fileSize: 2048, version: 1,
+      }),
+      schemas: vi.fn().mockResolvedValue(pageOf([photoType])),
+    });
+    renderDetail();
+    expect(await screen.findByRole('heading', { name: 'Logo' })).toBeInTheDocument();
+    await vi.waitFor(() => expect(screen.getByText('photo')).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /replace file/i })).toBeInTheDocument();
+  });
+
+  it('a refused replacement of a public-media image (409 PUBLIC_MEDIA_IMMUTABLE) says what to do instead', async () => {
+    const user = userEvent.setup();
+    const photoType = { id: 'sch_photo', typeName: 'photo', allowedSurfaces: ['document'], fileProfile: 'PUBLIC_MEDIA', fields: [] };
+    const uploadDocument = vi.fn().mockRejectedValue(
+      Object.assign(new Error('Conflict'), {
+        statusCode: 409,
+        body: { message: "This document's file type cannot be changed.", errorCode: 'PUBLIC_MEDIA_IMMUTABLE' },
+      }),
+    );
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1', title: 'Logo', status: 'ACTIVE', indexStatus: 'PENDING_UPLOAD', storeText: true, externalId: 'logo-1',
+        schemaId: 'sch_photo', fileType: 'image/png', fileSize: 2048, version: 1,
+      }),
+      schemas: vi.fn().mockResolvedValue(pageOf([photoType])),
+      uploadDocument,
+    });
+    renderDetail();
+    await screen.findByRole('button', { name: 'Replace file' });
+    await user.upload(screen.getByLabelText('Replacement file'), new File(['jpg'], 'logo.jpg', { type: 'image/jpeg' }));
+    expect(await screen.findByText(/pick a file of the same type/i)).toBeInTheDocument();
+  });
+
   it('says no text could be extracted, without fetching text, for a file the API read no text from', async () => {
     const getDocumentText = vi.fn().mockRejectedValue(Object.assign(new Error('Not found'), { statusCode: 404 }));
     stub({
@@ -417,6 +511,7 @@ describe('DocumentDetailPage', () => {
       expect(uploadDocument).toHaveBeenCalledWith({
         fileName: 'q1-v2.pdf',
         fileType: 'application/pdf',
+        size: 9,
         externalId: 'q1-report',
         confirmUntyped: true,
       }),
@@ -500,6 +595,7 @@ describe('DocumentDetailPage', () => {
       expect(uploadDocument).toHaveBeenCalledWith({
         fileName: 'contract-v2.pdf',
         fileType: 'application/pdf',
+        size: 9,
         externalId: 'contract-7',
         schemaId: 'sch_contract',
       }),

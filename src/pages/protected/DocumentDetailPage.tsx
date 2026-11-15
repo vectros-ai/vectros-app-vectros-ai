@@ -51,6 +51,7 @@ import {
   MetaRow,
   RequestIdCaption,
   fieldLabel,
+  errorCodeOf,
   formatCellValue,
 } from '@vectros-ai/react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -67,7 +68,7 @@ import {
 import { formatBytes } from '../../lib/formatBytes';
 import { httpsUrlOrNull } from '../../lib/httpsUrl';
 import { MAX_UPLOAD_BYTES } from '../../lib/uploadLimits';
-import { presignedUploadHeaders } from '../../lib/presignedUpload';
+import { presignedPutHeaders } from '../../lib/presignedUpload';
 import { drainPages } from '../../lib/drainPages';
 import { listAllSchemas } from '../../lib/listAllSchemas';
 import {
@@ -81,7 +82,7 @@ import { DocumentAskDrawer } from '../../components/DocumentAskDrawer';
 import { VersionHistory } from '../../components/VersionHistory';
 import { OwnershipScopeChips } from '../../components/OwnershipScopeChips';
 import { IndexFailureAlert } from '../../components/IndexFailureAlert';
-import { askUnavailableReason, hasNoExtractedText, isTextExtractionRunning } from '../../lib/documentText';
+import { askUnavailableReason, hasNoExtractedText, isPublicMediaDocument, isTextExtractionRunning } from '../../lib/documentText';
 
 // How often to re-read a document whose file text is still being extracted.
 const EXTRACTION_POLL_MS = 3000;
@@ -167,9 +168,15 @@ export function DocumentDetailPage(): React.JSX.Element {
   const doc = documentQuery.data;
   // A file the API could extract no text from keeps `storeText: true` but has no text to fetch, and while a file's
   // text is still being extracted the text request is a 404 as well.
-  const noTextExtracted = hasNoExtractedText(doc);
+  // A document of a public-media type holds an image and never has text; its file cannot be replaced once the upload has left
+  // PENDING_UPLOAD. Known from its type (the document itself carries `media` only once the image has been processed).
+  const docTypeIsPublicMedia = (schemasQuery.data ?? []).some(
+    (s) => s.id !== undefined && s.id === doc?.schemaId && s.fileProfile === 'PUBLIC_MEDIA',
+  );
+  const publicMedia = isPublicMediaDocument(doc) || docTypeIsPublicMedia;
+  const noTextExtracted = hasNoExtractedText(doc) || publicMedia;
   const textPending = isTextExtractionRunning(doc);
-  const askUnavailable = askUnavailableReason(doc);
+  const askUnavailable = publicMedia ? 'noText' : askUnavailableReason(doc);
   const hasText = doc?.storeText === true && !noTextExtracted && !textPending;
 
   // Archive / restore — the document lifecycle `status`. Archiving soft-
@@ -217,6 +224,8 @@ export function DocumentDetailPage(): React.JSX.Element {
       const issued = await client.documents.uploadDocument({
         fileName: file.name,
         fileType,
+        // The exact byte length, which binds the upload (see the add-document dialog); an empty file is sent unbound.
+        ...(file.size > 0 ? { size: file.size } : {}),
         externalId: doc.externalId,
         // A typed document's externalId lives in its type's namespace — the
         // re-upload must name the same schema to match the existing document
@@ -233,11 +242,11 @@ export function DocumentDetailPage(): React.JSX.Element {
         if (!uploadUrl) throw new Error('upload did not return an https presigned URL');
         // PUT the raw bytes straight to S3 — the presigned URL is self-
         // authenticating, so NO Authorization header (one would break the
-        // signature). Content-Type must match the fileType we declared, and
-        // any header the response requires is part of the signature too.
+        // signature). Every header the response requires is part of the
+        // signature, the Content-Type of a bound upload among them.
         const put = await fetch(uploadUrl, {
           method: 'PUT',
-          headers: { 'Content-Type': fileType, ...presignedUploadHeaders(issued) },
+          headers: presignedPutHeaders(issued, fileType),
           body: file,
         });
         if (!put.ok) throw new Error(`file upload failed: ${put.status}`);
@@ -567,6 +576,13 @@ export function DocumentDetailPage(): React.JSX.Element {
             <MetaRow label={intl.formatMessage({ id: 'documentDetail.fieldType' })}>
               <Typography variant="body2">{doc.fileType ?? '—'}</Typography>
             </MetaRow>
+            {/* What the file's content was detected as, which decides whether text is extracted; it can differ from the type
+                declared at upload. Absent until extraction has run. */}
+            {doc.detectedType && (
+              <MetaRow label={intl.formatMessage({ id: 'documentDetail.fieldDetectedType' })}>
+                <Typography variant="body2">{doc.detectedType}</Typography>
+              </MetaRow>
+            )}
             <MetaRow label={intl.formatMessage({ id: 'documentDetail.fieldSize' })}>
               <Typography variant="body2">{formatBytes(doc.fileSize)}</Typography>
             </MetaRow>
@@ -631,7 +647,7 @@ export function DocumentDetailPage(): React.JSX.Element {
                   aria-label={intl.formatMessage({ id: 'documentDetail.replaceFileAria' })}
                   onChange={(e) => handleReplaceFilePicked(e.target.files?.[0])}
                 />
-                {doc.externalId ? (
+                {publicMedia && doc.indexStatus !== 'PENDING_UPLOAD' ? null : doc.externalId ? (
                   <Button
                     variant="outlined"
                     size="small"
@@ -672,7 +688,13 @@ export function DocumentDetailPage(): React.JSX.Element {
               )}
               {replaceMutation.isError && (
                 <ApiErrorAlert error={replaceMutation.error}>
-                  <FormattedMessage id="documentDetail.replaceFileError" />
+                  <FormattedMessage
+                    id={
+                      errorCodeOf(replaceMutation.error) === 'PUBLIC_MEDIA_IMMUTABLE'
+                        ? 'documentDetail.replaceFilePublicMedia'
+                        : 'documentDetail.replaceFileError'
+                    }
+                  />
                 </ApiErrorAlert>
               )}
             </Stack>

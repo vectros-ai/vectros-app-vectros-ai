@@ -72,7 +72,7 @@ import { dataQueryKeys } from '../lib/dataQueryKeys';
 import { formatBytes } from '../lib/formatBytes';
 import { httpsUrlOrNull } from '../lib/httpsUrl';
 import { listAllSchemas } from '../lib/listAllSchemas';
-import { presignedUploadHeaders } from '../lib/presignedUpload';
+import { presignedPutHeaders } from '../lib/presignedUpload';
 import { MAX_UPLOAD_BYTES } from '../lib/uploadLimits';
 import { folderMenuItems } from './folderMenuItems';
 import { OwnershipScopeField } from './OwnershipScopeField';
@@ -92,6 +92,9 @@ interface AddDocumentDialogProps {
   readonly defaultTypeName?: string | undefined;
   readonly onClose: () => void;
 }
+
+/** The image types a public-media type accepts when it names none. */
+const PUBLIC_MEDIA_DEFAULT_TYPES: readonly string[] = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 export function AddDocumentDialog({
   open,
@@ -173,12 +176,20 @@ export function AddDocumentDialog({
     enabled: selectedTypeName !== NO_TYPE,
   });
   const activeSchema = resolvedSchemaQuery.data;
+  // A public-media type holds images: a file upload only, never indexed and with no text. The API refuses a text document of it
+  // and a document-level indexMode; there is no text to keep either, so the form offers none of the three for it.
+  const isPublicMedia = activeSchema?.fileProfile === 'PUBLIC_MEDIA';
   // Reserved identifier keys (externalId / ownership ids) are top-level
   // document fields, never payload entries — keep them out of the form.
   const schemaFields = (activeSchema?.fields ?? []).filter(
     (f) => !isReservedPayloadKey(f.fieldId),
   );
   const fieldErrors = activeSchema ? validateFields(schemaFields, payload) : {};
+
+  // A public-media type takes a file only: picking one while in text mode switches to the upload.
+  useEffect(() => {
+    if (isPublicMedia && mode === 'ingest') setMode('upload');
+  }, [isPublicMedia, mode]);
 
   // Reset the form each time the dialog opens, defaulting the target folder to
   // the folder the list is currently viewing (so adding from a folder lands the
@@ -235,8 +246,11 @@ export function AddDocumentDialog({
         const created = await client.documents.uploadDocument({
           fileName: file.name,
           fileType,
-          indexMode,
-          storeText,
+          // The exact byte length, which binds the upload: the URL is signed for this length and for the media type the
+          // response names, so a body that does not match is refused before anything is stored. The API takes a size of at least
+          // 1, so an empty file is sent unbound.
+          ...(file.size > 0 ? { size: file.size } : {}),
+          ...(isPublicMedia ? {} : { indexMode, storeText }),
           ...typePart,
           ...payloadPart,
           ...folderPart,
@@ -256,11 +270,11 @@ export function AddDocumentDialog({
           if (!uploadUrl) throw new Error('upload did not return an https presigned URL');
           // PUT the raw bytes straight to S3 — the presigned URL is self-
           // authenticating, so NO Authorization header (one would break the
-          // signature). Content-Type must match the fileType we declared, and
-          // any header the response requires is part of the signature too.
+          // signature). Every header the response requires is part of the
+          // signature, the Content-Type of a bound upload among them.
           const put = await fetch(uploadUrl, {
             method: 'PUT',
-            headers: { 'Content-Type': fileType, ...presignedUploadHeaders(created) },
+            headers: presignedPutHeaders(created, fileType),
             body: file,
           });
           if (!put.ok) throw new Error(`file upload failed: ${put.status}`);
@@ -376,10 +390,15 @@ export function AddDocumentDialog({
             <ToggleButton value="upload">
               <FormattedMessage id="addDocument.modeUpload" />
             </ToggleButton>
-            <ToggleButton value="ingest">
+            <ToggleButton value="ingest" disabled={isPublicMedia}>
               <FormattedMessage id="addDocument.modeIngest" />
             </ToggleButton>
           </ToggleButtonGroup>
+          {isPublicMedia && (
+            <Typography variant="caption" color="text.secondary">
+              <FormattedMessage id="addDocument.publicMediaHelp" />
+            </Typography>
+          )}
 
           {mode === 'upload' ? (
             <Box>
@@ -387,6 +406,8 @@ export function AddDocumentDialog({
                 ref={fileInputRef}
                 type="file"
                 hidden
+                // A public-media type accepts only its image types (all four when it names none).
+                accept={isPublicMedia ? (activeSchema?.contentTypes ?? PUBLIC_MEDIA_DEFAULT_TYPES).join(',') : undefined}
                 aria-label={intl.formatMessage({ id: 'addDocument.fileLabel' })}
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
@@ -419,17 +440,21 @@ export function AddDocumentDialog({
               {mutation.isPending && (
                 <LinearProgress sx={{ mt: 1.5 }} aria-label={intl.formatMessage({ id: 'addDocument.uploading' })} />
               )}
-              {/* File-only retention choice — text ingest always keeps its body. */}
-              <FormControlLabel
-                sx={{ mt: 1.5, display: 'block' }}
-                control={
-                  <Switch checked={storeText} onChange={(e) => setStoreText(e.target.checked)} />
-                }
-                label={intl.formatMessage({ id: 'addDocument.storeText' })}
-              />
-              <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                <FormattedMessage id="addDocument.storeTextHelp" />
-              </Typography>
+              {/* File-only retention choice — text ingest always keeps its body; a public-media type has no text. */}
+              {!isPublicMedia && (
+                <>
+                  <FormControlLabel
+                    sx={{ mt: 1.5, display: 'block' }}
+                    control={
+                      <Switch checked={storeText} onChange={(e) => setStoreText(e.target.checked)} />
+                    }
+                    label={intl.formatMessage({ id: 'addDocument.storeText' })}
+                  />
+                  <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                    <FormattedMessage id="addDocument.storeTextHelp" />
+                  </Typography>
+                </>
+              )}
             </Box>
           ) : (
             <>
@@ -500,23 +525,25 @@ export function AddDocumentDialog({
             />
           )}
 
-          <FormControl size="small">
-            <InputLabel id="add-doc-index-label">
-              <FormattedMessage id="addDocument.indexModeLabel" />
-            </InputLabel>
-            <Select
-              labelId="add-doc-index-label"
-              label={intl.formatMessage({ id: 'addDocument.indexModeLabel' })}
-              value={indexMode}
-              onChange={(e: SelectChangeEvent) => setIndexMode(e.target.value as IndexMode)}
-            >
-              {INDEX_MODES.map((m) => (
-                <MenuItem key={m} value={m}>
-                  {m}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
+          {!isPublicMedia && (
+            <FormControl size="small">
+              <InputLabel id="add-doc-index-label">
+                <FormattedMessage id="addDocument.indexModeLabel" />
+              </InputLabel>
+              <Select
+                labelId="add-doc-index-label"
+                label={intl.formatMessage({ id: 'addDocument.indexModeLabel' })}
+                value={indexMode}
+                onChange={(e: SelectChangeEvent) => setIndexMode(e.target.value as IndexMode)}
+              >
+                {INDEX_MODES.map((m) => (
+                  <MenuItem key={m} value={m}>
+                    {m}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
 
           {folders.length > 0 && (
             <FormControl size="small">
