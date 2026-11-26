@@ -64,7 +64,7 @@ npm run dev                          # dev server on port 3002
 
 > [!NOTE]
 > Some npm 10.x versions crash on `npm install` with `Cannot read properties of null (reading
-> 'edgesOut')` while resolving Vitest 4's optional peer dependencies — a known, still-open npm
+> 'edgesOut')` while resolving Vitest 4's optional peer dependencies — a known npm
 > bug ([npm/cli#9787](https://github.com/npm/cli/issues/9787)), not a real dependency conflict
 > here. Run `npm install --legacy-peer-deps` instead if you hit it.
 

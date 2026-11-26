@@ -98,13 +98,17 @@ export function DocumentDetailPage(): React.JSX.Element {
   const [downloading, setDownloading] = useState(false);
   // Why the last download did not open: the link could not be fetched (worth retrying), or the API
   // returned an address that is not https and was refused (retrying cannot change that).
-  const [downloadError, setDownloadError] = useState<'failed' | 'refused' | null>(null);
+  // 'noMedia': an image with no download (rejected, still being processed, or taken down), which trying again does not change.
+  const [downloadError, setDownloadError] = useState<'failed' | 'refused' | 'noMedia' | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
   // The hidden file input driving "Replace file" (re-upload → re-index).
   const replaceInputRef = useRef<HTMLInputElement>(null);
+  // A replacement file refused before any request (empty, or over the size limit): the message to show instead of the
+  // generic replace error, which would wrongly suggest that trying again helps.
+  const [replacePickError, setReplacePickError] = useState<'addDocument.fileEmpty' | 'addDocument.fileTooLarge' | null>(null);
   // The text card's view mode. null = "not chosen yet" — the effective view is
   // then derived from the Markdown-detection default once the text is known.
   const [textView, setTextView] = useState<'rendered' | 'raw' | null>(null);
@@ -175,6 +179,12 @@ export function DocumentDetailPage(): React.JSX.Element {
   );
   const publicMedia = isPublicMediaDocument(doc) || docTypeIsPublicMedia;
   const noTextExtracted = hasNoExtractedText(doc) || publicMedia;
+  // The API gives an image a download only once it is processed (READY or PUBLISHED) and not taken down; in any other state the
+  // page must not say what the download is, since there is none yet (or none at all).
+  const imageDownloadable =
+    publicMedia &&
+    (doc?.media?.state === 'READY' || doc?.media?.state === 'PUBLISHED') &&
+    !doc?.media?.takenDown;
   const textPending = isTextExtractionRunning(doc);
   const askUnavailable = publicMedia ? 'noText' : askUnavailableReason(doc);
   const hasText = doc?.storeText === true && !noTextExtracted && !textPending;
@@ -219,13 +229,17 @@ export function DocumentDetailPage(): React.JSX.Element {
       if (file.size > MAX_UPLOAD_BYTES) {
         throw new Error(intl.formatMessage({ id: 'addDocument.fileTooLarge' }));
       }
+      // The upload declares the file's exact length, which must be at least 1 byte.
+      if (file.size === 0) {
+        throw new Error(intl.formatMessage({ id: 'addDocument.fileEmpty' }));
+      }
       const client = vectrosApiClient(tenant, context);
       const fileType = file.type || 'application/octet-stream';
       const issued = await client.documents.uploadDocument({
         fileName: file.name,
         fileType,
-        // The exact byte length, which binds the upload (see the add-document dialog); an empty file is sent unbound.
-        ...(file.size > 0 ? { size: file.size } : {}),
+        // The exact byte length, which binds the upload (see the add-document dialog).
+        size: file.size,
         externalId: doc.externalId,
         // A typed document's externalId lives in its type's namespace — the
         // re-upload must name the same schema to match the existing document
@@ -275,8 +289,21 @@ export function DocumentDetailPage(): React.JSX.Element {
     },
   });
 
+  // Same-route navigation to another document: drop the previous document's replace outcome, so a message about a file picked
+  // for one document is never shown on another.
+  const resetReplace = replaceMutation.reset;
+  useEffect(() => {
+    setReplacePickError(null);
+    resetReplace();
+  }, [documentId, resetReplace]);
+
   const handleReplaceFilePicked = (file: File | undefined): void => {
-    if (file) replaceMutation.mutate(file);
+    if (file) {
+      const refused = file.size === 0 ? 'addDocument.fileEmpty' : file.size > MAX_UPLOAD_BYTES ? 'addDocument.fileTooLarge' : null;
+      setReplacePickError(refused);
+      if (refused) replaceMutation.reset();
+      else replaceMutation.mutate(file);
+    }
     // Allow re-picking the same file later (onChange fires only on change).
     if (replaceInputRef.current) replaceInputRef.current.value = '';
   };
@@ -342,8 +369,8 @@ export function DocumentDetailPage(): React.JSX.Element {
         // to get the link.
         setDownloadError(res.downloadUrl ? 'refused' : 'failed');
       }
-    } catch {
-      setDownloadError('failed');
+    } catch (err) {
+      setDownloadError(errorCodeOf(err) === 'NO_DOWNLOAD_FOR_MEDIA' ? 'noMedia' : 'failed');
     } finally {
       setDownloading(false);
     }
@@ -634,7 +661,13 @@ export function DocumentDetailPage(): React.JSX.Element {
                   disabled={downloading}
                 >
                   <FormattedMessage
-                    id={downloading ? 'documentDetail.downloading' : 'documentDetail.download'}
+                    id={
+                      downloading
+                        ? 'documentDetail.downloading'
+                        : publicMedia
+                          ? 'documentDetail.downloadImage'
+                          : 'documentDetail.download'
+                    }
                   />
                 </Button>
                 {/* Replace file (re-upload → re-extract → re-index). Keyed on the
@@ -677,13 +710,24 @@ export function DocumentDetailPage(): React.JSX.Element {
               {downloadError && (
                 <Alert severity="error" role="alert" sx={{ alignSelf: 'flex-start' }}>
                   <FormattedMessage
-                    id={downloadError === 'refused' ? 'documentDetail.downloadRefused' : 'documentDetail.downloadError'}
+                    id={
+                      downloadError === 'refused'
+                        ? 'documentDetail.downloadRefused'
+                        : downloadError === 'noMedia'
+                          ? 'documentDetail.downloadNoMedia'
+                          : 'documentDetail.downloadError'
+                    }
                   />
                 </Alert>
               )}
               {replaceMutation.isSuccess && (
                 <Alert severity="success" sx={{ alignSelf: 'flex-start' }}>
                   <FormattedMessage id="documentDetail.replaceFileSuccess" />
+                </Alert>
+              )}
+              {replacePickError && (
+                <Alert severity="error" role="alert" sx={{ alignSelf: 'flex-start' }}>
+                  <FormattedMessage id={replacePickError} />
                 </Alert>
               )}
               {replaceMutation.isError && (
@@ -791,8 +835,12 @@ export function DocumentDetailPage(): React.JSX.Element {
                   id={
                     fileViewEligible
                       ? 'documentDetail.fileViewIntro'
-                      : noTextExtracted
-                        ? 'documentDetail.textNotExtracted'
+                      : publicMedia
+                        ? imageDownloadable
+                          ? 'documentDetail.imageNoText'
+                          : 'documentDetail.imageNoTextOnly'
+                        : noTextExtracted
+                          ? 'documentDetail.textNotExtracted'
                         : textPending
                           ? 'documentDetail.textPending'
                           : 'documentDetail.textNotStored'

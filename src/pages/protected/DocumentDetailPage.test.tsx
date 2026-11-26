@@ -170,9 +170,97 @@ describe('DocumentDetailPage', () => {
     expect(await screen.findByRole('heading', { name: 'Logo' })).toBeInTheDocument();
     expect(screen.getByText('Detected type')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /replace file/i })).toBeNull();
-    expect(screen.getByRole('button', { name: /download original/i })).toBeInTheDocument();
+    // The uploaded file is not kept for an image: the download is the processed image, and nothing promises the original.
+    expect(screen.getByRole('button', { name: 'Download image' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /download original/i })).toBeNull();
+    expect(screen.getByText(/this image has no text\. its download is a copy of the processed image/i)).toBeInTheDocument();
+    expect(screen.queryByText(/the original is still available/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/couldn't load the extracted text/i)).not.toBeInTheDocument();
     expect(getDocumentText).not.toHaveBeenCalled();
+  });
+
+  function imageDoc(media: Record<string, unknown> | undefined): Record<string, unknown> {
+    return {
+      id: 'doc_1', title: 'Logo', status: 'ACTIVE', indexStatus: 'SKIPPED', storeText: true, externalId: 'logo-1',
+      fileType: 'image/png', fileSize: 2048, version: 1, ...(media ? { media } : {}),
+    };
+  }
+
+  it.each([
+    ['READY', { state: 'READY', desired: 'HELD' }],
+    ['PUBLISHED', { state: 'PUBLISHED', desired: 'PUBLIC' }],
+  ])('a %s image (it has a download) says what its download is', async (_name, media) => {
+    stub({ getDocument: vi.fn().mockResolvedValue(imageDoc(media)) });
+    renderDetail();
+    expect(await screen.findByText('This image has no text. Its download is a copy of the processed image; the uploaded file is not kept.')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['PROCESSING', { state: 'PROCESSING', desired: 'HELD' }],
+    ['REJECTED', { state: 'REJECTED', desired: 'HELD' }],
+    ['taken down', { state: 'PUBLISHED', desired: 'HELD', takenDown: '2026-11-20T10:00:00Z' }],
+    ['in an unrecognized state', { state: 'A_NEW_STATE', desired: 'HELD' }],
+  ])('an image that has no download (%s) says only that it has no text', async (_name, media) => {
+    stub({ getDocument: vi.fn().mockResolvedValue(imageDoc(media)) });
+    renderDetail();
+    expect(await screen.findByText('This image has no text.')).toBeInTheDocument();
+    expect(screen.queryByText(/its download is a copy of the processed image/i)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download image' })).toBeInTheDocument();
+  });
+
+  it('an image with no download (409 NO_DOWNLOAD_FOR_MEDIA) says so, with no "try again"', async () => {
+    const user = userEvent.setup();
+    const getDocumentDownloadUrl = vi.fn().mockRejectedValue(
+      Object.assign(new Error('Conflict'), {
+        statusCode: 409,
+        body: { message: 'This image has no download.', errorCode: 'NO_DOWNLOAD_FOR_MEDIA' },
+      }),
+    );
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1', title: 'Logo', status: 'ACTIVE', indexStatus: 'SKIPPED', storeText: true, externalId: 'logo-1',
+        fileType: 'image/png', fileSize: 2048, media: { state: 'REJECTED', desired: 'HELD' }, version: 1,
+      }),
+      getDocumentDownloadUrl,
+    });
+    renderDetail();
+    await user.click(await screen.findByRole('button', { name: 'Download image' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/this image has no download: it was rejected, is still being processed, or was taken down/i);
+    expect(alert).not.toHaveTextContent(/please try again/i);
+  });
+
+  it.each([
+    ['a 409 with no error code', { statusCode: 409, body: { message: 'Conflict' } }],
+    ['a 409 with another error code', { statusCode: 409, body: { message: 'Conflict', errorCode: 'SOMETHING_ELSE' } }],
+  ])('an image download refused with %s still says to try again (only NO_DOWNLOAD_FOR_MEDIA means no download)', async (_name, shape) => {
+    const user = userEvent.setup();
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1', title: 'Logo', status: 'ACTIVE', indexStatus: 'SKIPPED', storeText: true, externalId: 'logo-1',
+        fileType: 'image/png', fileSize: 2048, media: { state: 'READY', desired: 'HELD' }, version: 1,
+      }),
+      getDocumentDownloadUrl: vi.fn().mockRejectedValue(Object.assign(new Error('Conflict'), shape)),
+    });
+    renderDetail();
+    await user.click(await screen.findByRole('button', { name: 'Download image' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/please try again/i);
+    expect(alert).not.toHaveTextContent(/this image has no download/i);
+  });
+
+  it('a download that fails for another reason still says to try again', async () => {
+    const user = userEvent.setup();
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1', title: 'Q1 Report', status: 'ACTIVE', indexStatus: 'INDEXED', storeText: true,
+        fileType: 'application/pdf', fileSize: 2048, version: 1,
+      }),
+      getDocumentDownloadUrl: vi.fn().mockRejectedValue(Object.assign(new Error('Server error'), { statusCode: 500 })),
+    });
+    renderDetail();
+    await user.click(await screen.findByRole('button', { name: /download original/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/please try again/i);
   });
 
   it('a public-media document known only by its type (no `media` yet): no text request, Ask disabled, no Replace once uploaded', async () => {
@@ -199,6 +287,10 @@ describe('DocumentDetailPage', () => {
     await vi.waitFor(() => expect(screen.getByText('photo')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /replace file/i })).toBeNull();
     expect(screen.getByRole('button', { name: /ask/i })).toBeDisabled();
+    // Known as an image by its type alone: the image wording applies here too, never the original-file wording.
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Download image' })).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /download original/i })).toBeNull();
+    expect(screen.queryByText(/the original is still available/i)).not.toBeInTheDocument();
     expect(getDocumentText).not.toHaveBeenCalled();
   });
 
@@ -523,6 +615,74 @@ describe('DocumentDetailPage', () => {
     // The response names no required header, so none beyond Content-Type is sent.
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({ 'Content-Type': 'application/pdf' });
     expect(await screen.findByText(/re-indexing run in the background/i)).toBeInTheDocument();
+  });
+
+  it('refuses an empty replacement file before any upload, and says why; it hides the last outcome, and a file with content then replaces', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi.fn().mockResolvedValue({ id: 'doc_1', uploadUrl: 'https://s3.example/re-put' });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Q1 Report',
+        status: 'ACTIVE',
+        externalId: 'q1-report',
+        fileType: 'application/pdf',
+        storeText: false,
+      }),
+      uploadDocument,
+    });
+
+    renderDetail();
+
+    await screen.findByRole('button', { name: 'Replace file' });
+    // A first replacement succeeds, so its success message is showing.
+    await user.upload(screen.getByLabelText('Replacement file'), new File(['new bytes'], 'q1-v2.pdf', { type: 'application/pdf' }));
+    expect(await screen.findByText(/re-indexing run in the background/i)).toBeInTheDocument();
+    expect(uploadDocument).toHaveBeenCalledTimes(1);
+
+    await user.upload(screen.getByLabelText('Replacement file'), new File([], 'empty.pdf', { type: 'application/pdf' }));
+    expect(await screen.findByText('This file is empty. Choose a file with content.')).toBeInTheDocument();
+    expect(screen.queryByText(/re-indexing run in the background/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/couldn't replace the file/i)).not.toBeInTheDocument();
+    expect(uploadDocument).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await user.upload(screen.getByLabelText('Replacement file'), new File(['v3'], 'q1-v3.pdf', { type: 'application/pdf' }));
+    await vi.waitFor(() => expect(uploadDocument).toHaveBeenCalledTimes(2));
+    expect(uploadDocument.mock.calls[1]?.[0]).toMatchObject({ fileName: 'q1-v3.pdf', size: 2 });
+    expect(screen.queryByText('This file is empty. Choose a file with content.')).not.toBeInTheDocument();
+  });
+
+  it('refuses an oversize replacement file before any upload, naming the limit (not a "try again")', async () => {
+    const user = userEvent.setup();
+    const uploadDocument = vi.fn();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    stub({
+      getDocument: vi.fn().mockResolvedValue({
+        id: 'doc_1',
+        title: 'Q1 Report',
+        status: 'ACTIVE',
+        externalId: 'q1-report',
+        fileType: 'application/pdf',
+        storeText: false,
+      }),
+      uploadDocument,
+    });
+
+    renderDetail();
+
+    await screen.findByRole('button', { name: 'Replace file' });
+    // A File whose reported size exceeds the 100 MB cap (no real bytes allocated).
+    const big = new File(['x'], 'huge.pdf', { type: 'application/pdf' });
+    Object.defineProperty(big, 'size', { value: 101 * 1024 * 1024 });
+    await user.upload(screen.getByLabelText('Replacement file'), big);
+    expect(await screen.findByText(/larger than the 100 MB limit/i)).toBeInTheDocument();
+    expect(screen.queryByText(/couldn't replace the file/i)).not.toBeInTheDocument();
+    expect(uploadDocument).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('sends the header the re-upload response requires on the replacement PUT', async () => {

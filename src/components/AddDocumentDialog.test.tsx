@@ -1135,16 +1135,24 @@ describe('AddDocumentDialog — a public-media document type', () => {
     expect(screen.getByLabelText('Keep the extracted text')).toBeInTheDocument();
   });
 
-  it('an empty file is uploaded without a size (the API takes a size of at least 1)', async () => {
+  it('an empty file is refused before any upload (the upload needs a size of at least 1); a file with content then uploads', async () => {
     const user = userEvent.setup();
     const uploadDocument = vi.fn().mockResolvedValue({ id: 'doc_1', uploadUrl: 'https://s3.example/put', created: true });
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+    vi.stubGlobal('fetch', fetchMock);
     stub({ uploadDocument });
     renderDialog();
     await user.upload(screen.getByLabelText('File'), new File([], 'empty.txt', { type: 'text/plain' }));
+    expect(await screen.findByText('This file is empty. Choose a file with content.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeDisabled();
+    expect(uploadDocument).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await user.upload(screen.getByLabelText('File'), new File(['hello'], 'hello.txt', { type: 'text/plain' }));
+    expect(screen.queryByText('This file is empty. Choose a file with content.')).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Upload' }));
-    await vi.waitFor(() => expect(uploadDocument).toHaveBeenCalled());
-    expect(uploadDocument.mock.calls[0]?.[0]).not.toHaveProperty('size');
+    await vi.waitFor(() => expect(uploadDocument).toHaveBeenCalledTimes(1));
+    expect(uploadDocument.mock.calls[0]?.[0]).toMatchObject({ fileName: 'hello.txt', size: 5 });
   });
 });
 

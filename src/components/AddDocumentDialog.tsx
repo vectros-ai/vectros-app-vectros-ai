@@ -242,14 +242,17 @@ export function AddDocumentDialog({
         if (file.size > MAX_UPLOAD_BYTES) {
           throw new Error(intl.formatMessage({ id: 'addDocument.fileTooLarge' }));
         }
+        // The upload declares the file's exact length, which must be at least 1 byte.
+        if (file.size === 0) {
+          throw new Error(intl.formatMessage({ id: 'addDocument.fileEmpty' }));
+        }
         const fileType = file.type || 'application/octet-stream';
         const created = await client.documents.uploadDocument({
           fileName: file.name,
           fileType,
           // The exact byte length, which binds the upload: the URL is signed for this length and for the media type the
-          // response names, so a body that does not match is refused before anything is stored. The API takes a size of at least
-          // 1, so an empty file is sent unbound.
-          ...(file.size > 0 ? { size: file.size } : {}),
+          // response names, so a body that does not match is refused before anything is stored. An empty file is refused above.
+          size: file.size,
           ...(isPublicMedia ? {} : { indexMode, storeText }),
           ...typePart,
           ...payloadPart,
@@ -349,6 +352,7 @@ export function AddDocumentDialog({
   });
 
   const fileTooLarge = file !== null && file.size > MAX_UPLOAD_BYTES;
+  const fileEmpty = file !== null && file.size === 0;
   // A selected type must have finished resolving to its governing schema
   // before submit — otherwise a submit mid-resolution would silently create
   // an UNTYPED document instead of the typed one the user asked for.
@@ -359,7 +363,7 @@ export function AddDocumentDialog({
     !needsExplicitType &&
     Object.keys(fieldErrors).length === 0 &&
     (mode === 'upload'
-      ? file !== null && !fileTooLarge
+      ? file !== null && !fileTooLarge && !fileEmpty
       : title.trim() !== '' && text.trim() !== '' && scopeSel.valid);
 
   return (
@@ -409,7 +413,12 @@ export function AddDocumentDialog({
                 // A public-media type accepts only its image types (all four when it names none).
                 accept={isPublicMedia ? (activeSchema?.contentTypes ?? PUBLIC_MEDIA_DEFAULT_TYPES).join(',') : undefined}
                 aria-label={intl.formatMessage({ id: 'addDocument.fileLabel' })}
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => {
+                  setFile(e.target.files?.[0] ?? null);
+                  // A new pick replaces the last attempt's outcome, so a stale error never sits beside this file's message
+                  // (an upload still in progress keeps its outcome).
+                  if (!mutation.isPending) mutation.reset();
+                }}
               />
               <Button
                 variant="outlined"
@@ -423,7 +432,7 @@ export function AddDocumentDialog({
                 <Chip
                   label={`${file.name} · ${formatBytes(file.size)}`}
                   onDelete={() => setFile(null)}
-                  color={fileTooLarge ? 'error' : 'default'}
+                  color={fileTooLarge || fileEmpty ? 'error' : 'default'}
                   variant="outlined"
                   sx={{ mt: 1.5, maxWidth: '100%' }}
                 />
@@ -435,6 +444,11 @@ export function AddDocumentDialog({
               {fileTooLarge && (
                 <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
                   <FormattedMessage id="addDocument.fileTooLarge" />
+                </Typography>
+              )}
+              {fileEmpty && (
+                <Typography variant="caption" color="error" sx={{ display: 'block', mt: 0.5 }}>
+                  <FormattedMessage id="addDocument.fileEmpty" />
                 </Typography>
               )}
               {mutation.isPending && (

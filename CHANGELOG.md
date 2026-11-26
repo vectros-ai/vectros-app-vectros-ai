@@ -3,6 +3,18 @@
 All notable changes to app.vectros.ai are documented here.
 This project adheres to [Semantic Versioning](https://semver.org).
 
+## 0.23.0 — 2026-11-25
+
+### Changed
+
+- **The app is built on SDK 0.51.0.**
+- **An empty file cannot be uploaded.** Add document and Replace file say the file is empty and send nothing.
+
+### Fixed
+
+- **Replace file says when a file is over the 100 MB limit.**
+- **An image's page no longer offers the original file.** It offers Download image, a copy of the processed image, and says when an image has no download.
+
 ## 0.22.2 — 2026-11-14
 
 ### Changed
